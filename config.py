@@ -7,39 +7,36 @@ COMMISSION = 0.0002   # maker-ордер OKX futures (0.02%)
 SLIPPAGE   = 0.0002
 
 # ──────────────────────────────────────────────────────
-# СТРАТЕГИЯ: Multi-Timeframe Mean Reversion
-# Тренд вниз + RSI пик → SHORT
-# Тренд вверх + RSI дно → LONG
-# Вход ПОСЛЕ подтверждения разворота RSI (не в момент экстремума)
+# СТРАТЕГИЯ: Smart Money Concepts
+# CHoCH (смена структуры) → откат в Order Block → вход
+# SL под/над OB (структурный), TP фиксированный
 # ──────────────────────────────────────────────────────
 
-# EMA тренда: 48 × 15m = 12 часов
-EMA_1H         = 48    # 48 × 15m = 12 часов
-EMA_1H_SLOPE   = 12    # наклон за 3 часа (12 × 15m)
+# EMA макро-тренд: 48 × 15m = 12 часов
+EMA_1H       = 48    # span EMA
+EMA_1H_SLOPE = 12    # наклон за 3 часа (12 × 15m)
 
-# RSI пороги
-RSI_PERIOD    = 14
-RSI_LONG_MAX  = 28
-RSI_SHORT_MIN = 72
+# Pivot detection
+SWING_LEN   = 5    # баров для подтверждения свинг-пивота (5 × 15m = 75 мин)
+OB_LOOKBACK = 10   # поиск OB в последних N барах до CHoCH
 
-# BB
+# BB (оставлен как индикатор)
 BB_PERIOD = 20
 BB_STD    = 2.0
 
-# ADX
-ADX_PERIOD = 14
-ADX_MIN    = 15
+# RSI (оставлен как индикатор)
+RSI_PERIOD = 14
 
 # SL/TP
-SL_PCT    = 0.020   # 2.0%
-TP_PCT    = 0.035   # 3.5%  (R:R = 1.75)
+SL_PCT = 0.020   # 2.0% — максимальный SL (структурный SL обычно тiже)
+TP_PCT = 0.035   # 3.5%
 
 # Выход по развороту тренда
-TREND_EXIT_BARS = 10   # минимум баров (2.5 ч = 10 × 15m) перед trend exit
+TREND_EXIT_BARS = 10   # минимум 10 баров (2.5 ч) перед trend exit
 
-MAX_HOLD_BARS = 16     # 4 часа (16 × 15m)
+MAX_HOLD_BARS = 24     # 6 часов (24 × 15m)
 POSITION_PCT  = 0.95
 LEVERAGE      = 2
 
-# ATR нужен только для индикаторов
+# ATR
 ATR_PERIOD = 14

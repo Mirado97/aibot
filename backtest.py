@@ -7,13 +7,12 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    ADX_MIN, ADX_PERIOD, ATR_PERIOD,
-    BB_PERIOD, BB_STD,
+    ATR_PERIOD, BB_PERIOD, BB_STD,
     CAPITAL, COMMISSION,
     EMA_1H, EMA_1H_SLOPE,
-    LEVERAGE, MAX_HOLD_BARS, POSITION_PCT,
-    RSI_LONG_MAX, RSI_PERIOD, RSI_SHORT_MIN,
-    SL_PCT, SLIPPAGE, TP_PCT, TREND_EXIT_BARS,
+    LEVERAGE, MAX_HOLD_BARS, OB_LOOKBACK, POSITION_PCT,
+    RSI_PERIOD,
+    SL_PCT, SLIPPAGE, SWING_LEN, TP_PCT, TREND_EXIT_BARS,
 )
 
 
@@ -27,38 +26,33 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     h = df["high"]
     l = df["low"]
 
-    # ATR (для отчёта)
+    # ATR
     tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
     df["atr"] = tr.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean()
 
-    # ADX
-    up       = h.diff()
-    down     = -l.diff()
-    plus_dm  = pd.Series(np.where((up > down) & (up > 0),   up,   0.0), index=df.index)
-    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
-    atr_adx  = tr.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean()
-    plus_di  = 100 * plus_dm.ewm(alpha=1 / ADX_PERIOD,  adjust=False).mean() / atr_adx.replace(0, np.nan)
-    minus_di = 100 * minus_dm.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean() / atr_adx.replace(0, np.nan)
-    dx       = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)).fillna(0)
-    df["adx"] = dx.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean()
-
-    # RSI
+    # RSI (справочно)
     delta = c.diff()
     gain  = delta.clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
     loss  = (-delta).clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
     df["rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
 
-    # EMA 1h (симулированный через 5m данные)
+    # EMA тренда
     df["ema1h"] = c.ewm(span=EMA_1H, adjust=False).mean()
 
-    # Bollinger Bands
+    # Bollinger Bands (справочно)
     df["bb_mid"]   = c.rolling(BB_PERIOD).mean()
     bb_std         = c.rolling(BB_PERIOD).std()
     df["bb_upper"] = df["bb_mid"] + BB_STD * bb_std
     df["bb_lower"] = df["bb_mid"] - BB_STD * bb_std
 
-    # Volume MA
-    df["vol_ma"] = df["volume"].rolling(20).mean()
+    # Pivot highs / lows (центрированное окно — подтверждение с задержкой SWING_LEN)
+    _win = 2 * SWING_LEN + 1
+    df["ph"] = h.rolling(_win, center=True).apply(
+        lambda w: w[SWING_LEN] if w[SWING_LEN] == w.max() else np.nan, raw=True
+    )
+    df["pl"] = l.rolling(_win, center=True).apply(
+        lambda w: w[SWING_LEN] if w[SWING_LEN] == w.min() else np.nan, raw=True
+    )
 
     return df.dropna()
 
@@ -106,42 +100,56 @@ class Trade:
 # ---------------------------------------------------------------------------
 
 def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
-    opens   = df["open"].values
-    highs   = df["high"].values
-    lows    = df["low"].values
-    closes  = df["close"].values
-    adxs    = df["adx"].values
-    rsis    = df["rsi"].values
-    ema1h   = df["ema1h"].values
-    bb_up   = df["bb_upper"].values
-    bb_lo   = df["bb_lower"].values
-    vols    = df["volume"].values
-    vol_ma  = df["vol_ma"].values
+    opens  = df["open"].values
+    highs  = df["high"].values
+    lows   = df["low"].values
+    closes = df["close"].values
+    ema1h  = df["ema1h"].values
+    ph_arr = df["ph"].values
+    pl_arr = df["pl"].values
 
     n         = len(df)
     equity    = np.full(n, np.nan)
     equity[0] = CAPITAL
     capital   = CAPITAL
 
-    trades: list[Trade]      = []
-    pos:    Optional[Trade]  = None
+    trades: list[Trade]         = []
+    pos:    Optional[Trade]     = None
     pending_side: Optional[str] = None
+    pending_ob_sl: float        = np.nan
 
-    for i in range(EMA_1H_SLOPE + 2, n):
+    # SMC state
+    bias      = 0        # 1 = bullish bias, -1 = bearish
+    last_sh   = np.nan   # последний подтверждённый swing high
+    last_sh_i = 0
+    last_sl   = np.nan   # последний подтверждённый swing low
+    last_sl_i = 0
+    ob_active = False
+    ob_high   = np.nan
+    ob_low    = np.nan
+    ob_bias: Optional[str] = None
+    ob_born_i = 0
 
-        # ── Вход ─────────────────────────────────────────────────────────
+    start = EMA_1H_SLOPE + SWING_LEN + 2
+
+    for i in range(start, n):
+
+        # ── Вход в позицию ────────────────────────────────────────────────
         if pending_side and pos is None:
             entry = opens[i]
             side  = pending_side
             if side == "long":
-                sl = entry * (1 - SL_PCT)
+                sl_raw = pending_ob_sl if not np.isnan(pending_ob_sl) else entry * (1 - SL_PCT)
+                sl = max(sl_raw, entry * (1 - SL_PCT))   # структурный SL, но не шире SL_PCT
                 tp = entry * (1 + TP_PCT)
             else:
-                sl = entry * (1 + SL_PCT)
+                sl_raw = pending_ob_sl if not np.isnan(pending_ob_sl) else entry * (1 + SL_PCT)
+                sl = min(sl_raw, entry * (1 + SL_PCT))
                 tp = entry * (1 - TP_PCT)
             pos = Trade(side=side, entry_bar=i,
                         entry_price=entry, sl_price=sl, tp_price=tp)
-            pending_side = None
+            pending_side  = None
+            pending_ob_sl = np.nan
 
         # ── Управление позицией ───────────────────────────────────────────
         if pos is not None:
@@ -158,50 +166,88 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
 
             bars_in = i - pos.entry_bar
             if pos.side == "long":
-                if   opens[i] <= pos.sl_price:               _close(opens[i],     "sl_gap")
-                elif lo       <= pos.sl_price:               _close(pos.sl_price, "sl")
-                elif hi       >= pos.tp_price:               _close(pos.tp_price, "tp")
-                elif bars_in >= TREND_EXIT_BARS and ema1h[i] < ema1h[i - EMA_1H_SLOPE]:
-                    _close(cl, "trend_exit")
-                elif bars_in >= MAX_HOLD_BARS:               _close(cl,           "timeout")
+                if   opens[i] <= pos.sl_price:                                         _close(opens[i],     "sl_gap")
+                elif lo       <= pos.sl_price:                                         _close(pos.sl_price, "sl")
+                elif hi       >= pos.tp_price:                                         _close(pos.tp_price, "tp")
+                elif bars_in  >= TREND_EXIT_BARS and ema1h[i] < ema1h[i - EMA_1H_SLOPE]: _close(cl,          "trend_exit")
+                elif bars_in  >= MAX_HOLD_BARS:                                        _close(cl,           "timeout")
             else:
-                if   opens[i] >= pos.sl_price:               _close(opens[i],     "sl_gap")
-                elif hi       >= pos.sl_price:               _close(pos.sl_price, "sl")
-                elif lo       <= pos.tp_price:               _close(pos.tp_price, "tp")
-                elif bars_in >= TREND_EXIT_BARS and ema1h[i] > ema1h[i - EMA_1H_SLOPE]:
-                    _close(cl, "trend_exit")
-                elif bars_in >= MAX_HOLD_BARS:               _close(cl,           "timeout")
+                if   opens[i] >= pos.sl_price:                                         _close(opens[i],     "sl_gap")
+                elif hi       >= pos.sl_price:                                         _close(pos.sl_price, "sl")
+                elif lo       <= pos.tp_price:                                         _close(pos.tp_price, "tp")
+                elif bars_in  >= TREND_EXIT_BARS and ema1h[i] > ema1h[i - EMA_1H_SLOPE]: _close(cl,          "trend_exit")
+                elif bars_in  >= MAX_HOLD_BARS:                                        _close(cl,           "timeout")
 
         equity[i] = capital
 
-        # ── Сигнал ───────────────────────────────────────────────────────
-        if pos is None and pending_side is None:
-            cl  = closes[i]
-            rsi = rsis[i]
+        # ── Подтверждение пивотов (задержка SWING_LEN баров) ─────────────
+        conf = i - SWING_LEN
+        if conf >= 0:
+            if not np.isnan(ph_arr[conf]):
+                last_sh   = ph_arr[conf]
+                last_sh_i = conf
+            if not np.isnan(pl_arr[conf]):
+                last_sl   = pl_arr[conf]
+                last_sl_i = conf
 
-            # 1h тренд через наклон EMA144
+        # ── CHoCH: смена характера структуры ─────────────────────────────
+        if not (np.isnan(last_sh) or np.isnan(last_sl)):
+
+            if closes[i] > last_sh and bias <= 0:
+                # Бычий CHoCH: в медвежьей структуре цена пробила swing high
+                bias = 1
+                ob_active = False
+                lo_bound = max(last_sl_i, i - OB_LOOKBACK)
+                for k in range(i - 1, lo_bound - 1, -1):
+                    if opens[k] > closes[k]:   # медвежья свеча = бычий OB
+                        ob_high, ob_low   = highs[k], lows[k]
+                        ob_active         = True
+                        ob_bias           = "long"
+                        ob_born_i         = i
+                        break
+
+            elif closes[i] < last_sl and bias >= 0:
+                # Медвежий CHoCH: в бычьей структуре цена пробила swing low
+                bias = -1
+                ob_active = False
+                lo_bound = max(last_sh_i, i - OB_LOOKBACK)
+                for k in range(i - 1, lo_bound - 1, -1):
+                    if closes[k] > opens[k]:   # бычья свеча = медвежий OB
+                        ob_high, ob_low   = highs[k], lows[k]
+                        ob_active         = True
+                        ob_bias           = "short"
+                        ob_born_i         = i
+                        break
+
+        # ── Инвалидация / истечение OB ───────────────────────────────────
+        if ob_active:
+            if   ob_bias == "long"  and lows[i]  < ob_low  * 0.998:
+                ob_active = False
+            elif ob_bias == "short" and highs[i] > ob_high * 1.002:
+                ob_active = False
+            elif i - ob_born_i > OB_LOOKBACK * 2:
+                ob_active = False
+
+        # ── Сигнал: ретест OB + EMA макро-фильтр ─────────────────────────
+        if pos is None and pending_side is None and ob_active:
             trend_up   = ema1h[i] > ema1h[i - EMA_1H_SLOPE]
             trend_down = ema1h[i] < ema1h[i - EMA_1H_SLOPE]
 
-            adx_ok = adxs[i] > ADX_MIN
+            if (ob_bias == "long"
+                    and lows[i]  <= ob_high        # цена дотянулась до OB
+                    and closes[i] >= ob_low        # не пробила OB насквозь
+                    and trend_up):
+                pending_side  = "long"
+                pending_ob_sl = ob_low * 0.998     # SL под OB
+                ob_active     = False
 
-            # Разворот RSI: минимум +1.5 пункта вверх от уровня ниже порога
-            rsi_turned_up   = (rsis[i] >= rsis[i-1] + 1.5) and rsis[i-1] <= RSI_LONG_MAX
-            rsi_turned_down = (rsis[i] <= rsis[i-1] - 1.5) and rsis[i-1] >= RSI_SHORT_MIN
-
-            # LONG: тренд вверх + RSI реально развернулся + ниже BB
-            if (trend_up
-                    and rsi_turned_up
-                    and closes[i-1] < bb_lo[i-1]
-                    and adx_ok):
-                pending_side = "long"
-
-            # SHORT: тренд вниз + RSI реально развернулся + выше BB
-            elif (trend_down
-                    and rsi_turned_down
-                    and closes[i-1] > bb_up[i-1]
-                    and adx_ok):
-                pending_side = "short"
+            elif (ob_bias == "short"
+                    and highs[i] >= ob_low         # цена дотянулась до OB
+                    and closes[i] <= ob_high       # не пробила OB насквозь
+                    and trend_down):
+                pending_side  = "short"
+                pending_ob_sl = ob_high * 1.002    # SL над OB
+                ob_active     = False
 
     if pos is not None:
         pos.exit_bar    = n - 1
@@ -241,7 +287,7 @@ def calc_stats(trades: list[Trade], equity: np.ndarray) -> dict:
 
     eq_s          = pd.Series(equity)
     rets          = eq_s.pct_change().dropna()
-    bars_per_year = 365 * 24 * 12
+    bars_per_year = 365 * 24 * 4   # 15m баров в году
     sharpe = rets.mean() / rets.std() * np.sqrt(bars_per_year) if rets.std() > 0 else 0.0
 
     exit_reasons: dict[str, int] = {}
@@ -267,12 +313,12 @@ def calc_stats(trades: list[Trade], equity: np.ndarray) -> dict:
 
 def print_report(stats: dict) -> None:
     if not stats:
-        print("Нет сделок — условия не выполнились за 2 года.")
+        print("Нет сделок — условия не выполнились за период.")
         return
 
     sep = "─" * 44
     print(f"\n{sep}")
-    print(f"  БЭКТЕСТ ETH/USDT:USDT  15m  |  MTF MeanRev")
+    print(f"  БЭКТЕСТ ETH/USDT:USDT  15m  |  SMC")
     print(sep)
     print(f"  Сделок всего     : {stats['n_trades']}  "
           f"(L:{stats['n_long']} / S:{stats['n_short']})")
@@ -285,7 +331,7 @@ def print_report(stats: dict) -> None:
     print(f"  Ср. победа       : {stats['avg_win_pct']:+.2f}%")
     print(f"  Ср. потеря       : {stats['avg_loss_pct']:+.2f}%")
     print(f"  Ср. держание     : {stats['avg_hold_bars']:.0f} баров  "
-          f"({stats['avg_hold_bars'] * 5 / 60:.1f} ч)")
+          f"({stats['avg_hold_bars'] * 15 / 60:.1f} ч)")
     print(sep)
     print("  Причины выходов:")
     for reason, cnt in sorted(stats["exit_reasons"].items(), key=lambda x: -x[1]):

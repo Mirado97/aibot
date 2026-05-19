@@ -1,4 +1,4 @@
-SYMBOL    = "ETH/USDT-SWAP"   # OKX фьючерсы (нужны для шорта)
+SYMBOL    = "ETH/USDT:USDT"   # OKX perpetual swap в ccxt
 TIMEFRAME = "5m"
 CAPITAL   = 300.0
 DAYS_BACK = 730

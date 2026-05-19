@@ -1,7 +1,7 @@
 SYMBOL    = "ETH/USDT:USDT"
 TIMEFRAME = "15m"
 CAPITAL   = 300.0
-DAYS_BACK = 730
+DAYS_BACK = 1095
 
 COMMISSION = 0.0002   # maker-ордер OKX futures (0.02%)
 SLIPPAGE   = 0.0002
@@ -19,8 +19,8 @@ EMA_1H_SLOPE   = 12    # наклон за 3 часа (12 × 15m)
 
 # RSI пороги
 RSI_PERIOD    = 14
-RSI_LONG_MAX  = 30
-RSI_SHORT_MIN = 70
+RSI_LONG_MAX  = 28
+RSI_SHORT_MIN = 72
 
 # BB
 BB_PERIOD = 20

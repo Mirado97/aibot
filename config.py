@@ -1,42 +1,42 @@
-SYMBOL    = "ETH/USDT:USDT"   # OKX perpetual swap
+SYMBOL    = "ETH/USDT:USDT"
 TIMEFRAME = "5m"
 CAPITAL   = 300.0
 DAYS_BACK = 730
 
-# Комиссии OKX фьючерсы
 COMMISSION = 0.0005
 SLIPPAGE   = 0.0003
 
 # ──────────────────────────────────────────────────────
-# СТРАТЕГИЯ: тренд-выровненный mean reversion
-# Нисходящий тренд + RSI > 65 → SHORT (продаём ралли)
-# Восходящий тренд + RSI < 35 → LONG  (покупаем откат)
+# СТРАТЕГИЯ: Multi-Timeframe Mean Reversion
+# 1h тренд вниз + 5m RSI пик → SHORT
+# 1h тренд вверх + 5m RSI дно → LONG
+# Вход ПОСЛЕ подтверждения разворота RSI (не в момент экстремума)
 # ──────────────────────────────────────────────────────
 
-# Определение тренда: наклон EMA50 за последние N баров
-EMA_SLOPE_BARS = 24   # 2 часа
+# Симуляция 1h тренда через EMA(144) на 5m барах
+EMA_1H         = 144   # 144 × 5m = 12 часов ≈ 1h тренд
+EMA_1H_SLOPE   = 36    # наклон за 3 часа
 
-# ADX
-ADX_PERIOD = 14
-ADX_MIN    = 18
-
-# EMA
-EMA_FAST   = 20
-EMA_SLOW   = 50
-
-# RSI
+# RSI пороги (вход только в экстремальных зонах)
 RSI_PERIOD    = 14
-RSI_LONG_MAX  = 35    # LONG только когда RSI ниже этого (перепроданность)
-RSI_SHORT_MIN = 65    # SHORT только когда RSI выше этого (перекупленность)
+RSI_LONG_MAX  = 33     # RSI дно для лонга
+RSI_SHORT_MIN = 67     # RSI пик для шорта
 
-# Bollinger Bands
+# BB
 BB_PERIOD = 20
 BB_STD    = 2.0
 
-# Риск-менеджмент
-ATR_PERIOD    = 14
-SL_ATR        = 1.5
-TP_ATR        = 2.5   # R:R = 1.67, breakeven WR = 37.5%
-MAX_HOLD_BARS = 36
+# ADX
+ADX_PERIOD = 14
+ADX_MIN    = 15
+
+# Фиксированный % SL/TP (не ATR — стабильнее на волатильном рынке)
+SL_PCT = 0.020    # 2.0% стоп
+TP_PCT = 0.030    # 3.0% тейк  (R:R = 1.5, breakeven WR = 40%)
+
+MAX_HOLD_BARS = 48
 POSITION_PCT  = 0.95
 LEVERAGE      = 2
+
+# ATR нужен только для индикаторов
+ATR_PERIOD = 14

@@ -19,8 +19,8 @@ EMA_1H_SLOPE   = 36    # наклон за 3 часа
 
 # RSI пороги
 RSI_PERIOD    = 14
-RSI_LONG_MAX  = 33
-RSI_SHORT_MIN = 67
+RSI_LONG_MAX  = 28
+RSI_SHORT_MIN = 72
 
 # BB
 BB_PERIOD = 20
@@ -35,7 +35,7 @@ SL_PCT    = 0.020   # 2.0%
 TP_PCT    = 0.035   # 3.5%  (R:R = 1.75, breakeven WR = 36.4% с maker-комиссией)
 
 # Выход по развороту тренда (вместо таймаута)
-TREND_EXIT_BARS = 6    # минимум баров в позиции перед trend exit
+TREND_EXIT_BARS = 30   # минимум баров (2.5 ч) перед trend exit
 
 MAX_HOLD_BARS = 48
 POSITION_PCT  = 0.95

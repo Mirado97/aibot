@@ -30,11 +30,12 @@ BB_STD    = 2.0
 ADX_PERIOD = 14
 ADX_MIN    = 15
 
-# Фиксированный % SL/TP (не ATR — стабильнее на волатильном рынке)
-SL_PCT = 0.020    # 2.0% стоп
-TP_PCT = 0.030    # 3.0% тейк  (R:R = 1.5, breakeven WR = 40%)
+# Фиксированный % SL/TP
+SL_PCT         = 0.010   # 1.0% стоп
+TP_PCT         = 0.018   # 1.8% тейк  (R:R = 1.8, breakeven WR = 35.7%)
+TRAIL_TO_BE    = 0.007   # при +0.7% движении → стоп в безубыток
 
-MAX_HOLD_BARS = 48
+MAX_HOLD_BARS = 24       # 2 часа (было 4)
 POSITION_PCT  = 0.95
 LEVERAGE      = 2
 

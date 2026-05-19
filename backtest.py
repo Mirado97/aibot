@@ -13,7 +13,7 @@ from config import (
     EMA_1H, EMA_1H_SLOPE,
     LEVERAGE, MAX_HOLD_BARS, POSITION_PCT,
     RSI_LONG_MAX, RSI_PERIOD, RSI_SHORT_MIN,
-    SL_PCT, SLIPPAGE, TP_PCT,
+    SL_PCT, SLIPPAGE, TP_PCT, TRAIL_TO_BE,
 )
 
 
@@ -74,6 +74,7 @@ class Trade:
     entry_price: float
     sl_price:    float
     tp_price:    float
+    be_moved:    bool            = False
     exit_bar:    Optional[int]   = None
     exit_price:  Optional[float] = None
     exit_reason: Optional[str]   = None
@@ -146,6 +147,16 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
         # ── Управление позицией ───────────────────────────────────────────
         if pos is not None:
             hi, lo, cl = highs[i], lows[i], closes[i]
+
+            # Трейлинг в безубыток: при +TRAIL_TO_BE% двигаем стоп в entry
+            if not pos.be_moved:
+                ep = pos.entry_price
+                if pos.side == "long"  and hi >= ep * (1 + TRAIL_TO_BE):
+                    pos.sl_price = ep
+                    pos.be_moved = True
+                elif pos.side == "short" and lo <= ep * (1 - TRAIL_TO_BE):
+                    pos.sl_price = ep
+                    pos.be_moved = True
 
             def _close(price: float, reason: str) -> None:
                 nonlocal capital, pos
@@ -257,6 +268,7 @@ def calc_stats(trades: list[Trade], equity: np.ndarray) -> dict:
         "avg_loss_pct":  avg_loss,
         "avg_hold_bars": np.mean([t.bars_held for t in trades]),
         "exit_reasons":  exit_reasons,
+        "be_trades":     sum(1 for t in trades if t.be_moved),
     }
 
 
@@ -281,6 +293,7 @@ def print_report(stats: dict) -> None:
     print(f"  Ср. потеря       : {stats['avg_loss_pct']:+.2f}%")
     print(f"  Ср. держание     : {stats['avg_hold_bars']:.0f} баров  "
           f"({stats['avg_hold_bars'] * 5 / 60:.1f} ч)")
+    print(f"  Трейлинг BE      : {stats.get('be_trades', 0)} сделок")
     print(sep)
     print("  Причины выходов:")
     for reason, cnt in sorted(stats["exit_reasons"].items(), key=lambda x: -x[1]):

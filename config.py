@@ -17,8 +17,8 @@ EMA_1H       = 48    # span EMA
 EMA_1H_SLOPE = 12    # наклон за 3 часа (12 × 15m)
 
 # Pivot detection
-SWING_LEN   = 5    # баров для подтверждения свинг-пивота (5 × 15m = 75 мин)
-OB_LOOKBACK = 10   # поиск OB в последних N барах до CHoCH
+SWING_LEN   = 15   # баров для подтверждения свинг-пивота (15 × 15m = 3.75 ч)
+OB_LOOKBACK = 15   # поиск OB в последних N барах до CHoCH
 
 # BB (оставлен как индикатор)
 BB_PERIOD = 20
@@ -32,9 +32,9 @@ SL_PCT = 0.020   # 2.0% — максимальный SL (структурный 
 TP_PCT = 0.035   # 3.5%
 
 # Выход по развороту тренда
-TREND_EXIT_BARS = 10   # минимум 10 баров (2.5 ч) перед trend exit
+TREND_EXIT_BARS = 15   # минимум 15 баров (3.75 ч) перед trend exit
 
-MAX_HOLD_BARS = 24     # 6 часов (24 × 15m)
+MAX_HOLD_BARS = 32     # 8 часов (32 × 15m)
 POSITION_PCT  = 0.95
 LEVERAGE      = 2
 

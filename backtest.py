@@ -54,7 +54,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         lambda w: w[SWING_LEN] if w[SWING_LEN] == w.min() else np.nan, raw=True
     )
 
-    return df.dropna()
+    return df.dropna(subset=["atr", "rsi", "ema1h", "bb_mid", "bb_upper", "bb_lower"])
 
 
 # ---------------------------------------------------------------------------

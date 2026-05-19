@@ -10,7 +10,7 @@ from config import (
     ADX_PERIOD, ADX_RANGE, ADX_TREND,
     ATR_PERIOD, BB_PERIOD, BB_STD,
     CAPITAL, COMMISSION,
-    EMA_FAST, EMA_SLOW,
+    EMA_FAST, EMA_SLOW, EMA_TREND_FILTER,
     MAX_HOLD_BARS, POSITION_PCT,
     RSI_BUY, RSI_EXIT, RSI_PERIOD,
     SL_ATR, SLIPPAGE, TP_ATR,
@@ -67,8 +67,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"] = df["bb_mid"] - BB_STD * bb_std
 
     # EMA
-    df["ema_fast"] = c.ewm(span=EMA_FAST, adjust=False).mean()
-    df["ema_slow"] = c.ewm(span=EMA_SLOW, adjust=False).mean()
+    df["ema_fast"]  = c.ewm(span=EMA_FAST,         adjust=False).mean()
+    df["ema_slow"]  = c.ewm(span=EMA_SLOW,         adjust=False).mean()
+    df["ema_trend"] = c.ewm(span=EMA_TREND_FILTER, adjust=False).mean()
 
     # Volume MA
     df["vol_ma"] = df["volume"].rolling(20).mean()
@@ -119,15 +120,17 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
     lows    = df["low"].values
     closes  = df["close"].values
     atrs    = df["atr"].values
-    adxs    = df["adx"].values
-    plus_di = df["plus_di"].values
-    rsis    = df["rsi"].values
-    bb_low  = df["bb_lower"].values
-    bb_mid  = df["bb_mid"].values
-    ema_f   = df["ema_fast"].values
-    ema_s   = df["ema_slow"].values
-    vols    = df["volume"].values
-    vol_ma  = df["vol_ma"].values
+    adxs     = df["adx"].values
+    plus_di  = df["plus_di"].values
+    minus_di = df["minus_di"].values
+    rsis     = df["rsi"].values
+    bb_low    = df["bb_lower"].values
+    bb_mid    = df["bb_mid"].values
+    ema_f     = df["ema_fast"].values
+    ema_s     = df["ema_slow"].values
+    ema_trend = df["ema_trend"].values
+    vols      = df["volume"].values
+    vol_ma    = df["vol_ma"].values
 
     n       = len(df)
     equity  = np.full(n, np.nan)
@@ -190,21 +193,28 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
             rsi  = rsis[i]
             vol  = vols[i]
             vma  = vol_ma[i]
+            cl   = closes[i]
+            et   = ema_trend[i]
 
-            if adx < ADX_RANGE:
+            # Глобальный фильтр: не торгуем в устойчивом нисходящем тренде
+            # (цена должна быть не ниже 3% от EMA200)
+            above_trend = cl > et * 0.97
+
+            if above_trend and adx < ADX_RANGE:
                 # Режим боковика → mean reversion
+                # Требуем объёмный всплеск — признак капитуляции
                 if (rsi < RSI_BUY
-                        and closes[i] < bb_low[i]
-                        and vol > vma * 0.8):
+                        and cl < bb_low[i]
+                        and vol > vma * 1.3):
                     pending = True
 
-            elif adx > ADX_TREND:
-                # Режим тренда → покупка на откате
-                near_ema = ema_f[i] * 0.990 < closes[i] < ema_f[i] * 1.005
-                uptrend  = ema_f[i] > ema_s[i] and plus_di[i] > 20
+            elif above_trend and adx > ADX_TREND:
+                # Режим тренда → покупка на откате к EMA20
+                near_ema   = ema_f[i] * 0.990 < cl < ema_f[i] * 1.005
+                uptrend    = ema_f[i] > ema_s[i] and plus_di[i] > minus_di[i] + 8
                 adx_rising = adxs[i] > adxs[i - 1]
                 if (uptrend and near_ema
-                        and 42 < rsi < 62
+                        and 42 < rsi < 60
                         and adx_rising):
                     pending = True
 

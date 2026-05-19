@@ -185,21 +185,23 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
 
             adx_ok = adxs[i] > ADX_MIN
 
-            # Подтверждение разворота RSI (уже повернул, не в пике/дне)
-            rsi_turned_up   = rsis[i] > rsis[i-1] and rsis[i-1] <= RSI_LONG_MAX
-            rsi_turned_down = rsis[i] < rsis[i-1] and rsis[i-1] >= RSI_SHORT_MIN
+            # Разворот RSI: минимум +1.5 пункта вверх от уровня ниже порога
+            rsi_turned_up   = (rsis[i] >= rsis[i-1] + 1.5) and rsis[i-1] <= RSI_LONG_MAX
+            rsi_turned_down = (rsis[i] <= rsis[i-1] - 1.5) and rsis[i-1] >= RSI_SHORT_MIN
 
-            # LONG: 1h тренд вверх + RSI только что вышел из перепроданности + ниже BB
+            # LONG: тренд вверх + RSI реально развернулся + бар сигнала бычий + ниже BB
             if (trend_up
                     and rsi_turned_up
-                    and closes[i-1] < bb_lo[i-1]   # предыдущая свеча была ниже BB
+                    and closes[i] > opens[i]          # бар подтверждает разворот ценой
+                    and closes[i-1] < bb_lo[i-1]
                     and adx_ok):
                 pending_side = "long"
 
-            # SHORT: 1h тренд вниз + RSI только что вышел из перекупленности + выше BB
+            # SHORT: тренд вниз + RSI реально развернулся + бар сигнала медвежий + выше BB
             elif (trend_down
                     and rsi_turned_down
-                    and closes[i-1] > bb_up[i-1]   # предыдущая свеча была выше BB
+                    and closes[i] < opens[i]          # бар подтверждает разворот ценой
+                    and closes[i-1] > bb_up[i-1]
                     and adx_ok):
                 pending_side = "short"
 

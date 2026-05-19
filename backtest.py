@@ -10,11 +10,15 @@ from config import (
     ADX_MIN, ADX_PERIOD,
     ATR_PERIOD, BB_PERIOD, BB_STD,
     CAPITAL, COMMISSION,
-    EMA_FAST, EMA_MID, EMA_SLOW, EMA_TREND_FILTER,
+    EMA_FAST, EMA_MID, EMA_MACRO, EMA_SLOW,
     MAX_HOLD_BARS, POSITION_PCT,
-    RSI_PERIOD, RSI_PULL_HIGH, RSI_PULL_LOW,
+    RSI_HIGH, RSI_LOW, RSI_PERIOD,
     SL_ATR, SLIPPAGE, TP_ATR,
+    TRAIL_SL_ATR, TRAIL_TRIGGER_ATR,
 )
+
+# Сколько баров назад смотрим для определения наклона EMA_MACRO (12 часов)
+_MACRO_SLOPE_BARS = 144
 
 
 # ---------------------------------------------------------------------------
@@ -36,15 +40,14 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["atr"] = tr.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean()
 
     # ADX / +DI / -DI
-    up   = h.diff()
-    down = -l.diff()
+    up       = h.diff()
+    down     = -l.diff()
     plus_dm  = pd.Series(np.where((up > down) & (up > 0),   up,   0.0), index=df.index)
     minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
-
-    atr_adx   = tr.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean()
-    plus_di   = 100 * plus_dm.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean() / atr_adx.replace(0, np.nan)
-    minus_di  = 100 * minus_dm.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean() / atr_adx.replace(0, np.nan)
-    dx        = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)).fillna(0)
+    atr_adx  = tr.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean()
+    plus_di  = 100 * plus_dm.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean() / atr_adx.replace(0, np.nan)
+    minus_di = 100 * minus_dm.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean() / atr_adx.replace(0, np.nan)
+    dx       = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)).fillna(0)
     df["adx"]      = dx.ewm(alpha=1 / ADX_PERIOD, adjust=False).mean()
     df["plus_di"]  = plus_di
     df["minus_di"] = minus_di
@@ -56,12 +59,12 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
 
     # EMA лесенка
-    df["ema_fast"]  = c.ewm(span=EMA_FAST,         adjust=False).mean()
-    df["ema_slow"]  = c.ewm(span=EMA_SLOW,         adjust=False).mean()
-    df["ema_mid"]   = c.ewm(span=EMA_MID,          adjust=False).mean()
-    df["ema_trend"] = c.ewm(span=EMA_TREND_FILTER, adjust=False).mean()
+    df["ema_fast"]  = c.ewm(span=EMA_FAST,  adjust=False).mean()
+    df["ema_slow"]  = c.ewm(span=EMA_SLOW,  adjust=False).mean()
+    df["ema_mid"]   = c.ewm(span=EMA_MID,   adjust=False).mean()
+    df["ema_macro"] = c.ewm(span=EMA_MACRO, adjust=False).mean()
 
-    # Bollinger Bands (для справки в отчёте)
+    # Bollinger Bands
     df["bb_mid"]   = c.rolling(BB_PERIOD).mean()
     bb_std         = c.rolling(BB_PERIOD).std()
     df["bb_upper"] = df["bb_mid"] + BB_STD * bb_std
@@ -83,7 +86,7 @@ class Trade:
     entry_price: float
     sl_price:    float
     tp_price:    float
-    be_moved:    bool          = False   # стоп передвинут в безубыток
+    be_moved:    bool          = False
     exit_bar:    Optional[int]   = None
     exit_price:  Optional[float] = None
     exit_reason: Optional[str]   = None
@@ -124,20 +127,20 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
     ema_f    = df["ema_fast"].values
     ema_s    = df["ema_slow"].values
     ema_m    = df["ema_mid"].values
-    ema_t    = df["ema_trend"].values
+    ema_mac  = df["ema_macro"].values
     vols     = df["volume"].values
     vol_ma   = df["vol_ma"].values
 
-    n       = len(df)
-    equity  = np.full(n, np.nan)
+    n         = len(df)
+    equity    = np.full(n, np.nan)
     equity[0] = CAPITAL
-    capital = CAPITAL
+    capital   = CAPITAL
 
     trades:  list[Trade]     = []
     pos:     Optional[Trade] = None
     pending: bool            = False
 
-    for i in range(2, n):
+    for i in range(_MACRO_SLOPE_BARS + 1, n):
         atr = atrs[i]
 
         # ── Вход по отложенному сигналу ──────────────────────────────────
@@ -152,9 +155,9 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
         if pos is not None:
             hi, lo, cl = highs[i], lows[i], closes[i]
 
-            # Трейлинг: как только цена прошла 1 ATR вверх — стоп в безубыток
-            if not pos.be_moved and hi >= pos.entry_price + atr:
-                pos.sl_price = pos.entry_price
+            # Трейлинг: при +1.5 ATR двигаем стоп в +0.5 ATR
+            if not pos.be_moved and hi >= pos.entry_price + atr * TRAIL_TRIGGER_ATR:
+                pos.sl_price = pos.entry_price + atr * TRAIL_SL_ATR
                 pos.be_moved = True
 
             def _close(price: float, reason: str) -> None:
@@ -166,15 +169,15 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
                 trades.append(pos)
                 pos = None
 
-            if opens[i] <= pos.sl_price:          # гэп вниз
+            if opens[i] <= pos.sl_price:
                 _close(opens[i], "sl_gap")
-            elif lo <= pos.sl_price:               # стоп
+            elif lo <= pos.sl_price:
                 _close(pos.sl_price, "sl")
-            elif hi >= pos.tp_price:               # тейк
+            elif hi >= pos.tp_price:
                 _close(pos.tp_price, "tp")
-            elif (i - pos.entry_bar) >= MAX_HOLD_BARS:  # таймаут
+            elif (i - pos.entry_bar) >= MAX_HOLD_BARS:
                 _close(cl, "timeout")
-            elif ema_f[i] < ema_s[i] and (i - pos.entry_bar) > 3:  # тренд сломан
+            elif ema_f[i] < ema_s[i] and (i - pos.entry_bar) > 5:
                 _close(cl, "trend_break")
 
         equity[i] = capital
@@ -184,22 +187,26 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
             cl  = closes[i]
             rsi = rsis[i]
 
-            # 1. Макро тренд: цена выше всех EMA, EMA лесенка вверх
-            macro   = cl > ema_t[i] and ema_s[i] > ema_m[i] and ema_m[i] > ema_t[i]
-            # 2. Краткосрочный тренд: EMA20 > EMA50
-            micro   = ema_f[i] > ema_s[i]
-            # 3. +DI доминирует (покупатели сильнее продавцов)
-            di_ok   = plus_di[i] > minus_di[i] + 5
-            # 4. Есть тренд (не боковик)
-            adx_ok  = adxs[i] > ADX_MIN
-            # 5. RSI в зоне отката (не перекуплен, не перепродан)
-            rsi_ok  = RSI_PULL_LOW <= rsi <= RSI_PULL_HIGH
-            # 6. RSI разворачивается вверх (моментум возобновляется)
-            rsi_up  = rsis[i] > rsis[i - 1] > rsis[i - 2]
-            # 7. Тихий откат (объём ниже среднего — продавцов мало)
-            vol_ok  = vols[i] < vol_ma[i] * 1.05
+            # 1. Макро тренд: 7-дневная EMA растёт (12-часовой наклон)
+            macro_up = (cl > ema_mac[i]
+                        and ema_mac[i] > ema_mac[i - _MACRO_SLOPE_BARS])
 
-            if macro and micro and di_ok and adx_ok and rsi_ok and rsi_up and vol_ok:
+            # 2. Краткосрочный и среднесрочный тренд выровнены
+            trend_aligned = ema_f[i] > ema_s[i] > ema_m[i]
+
+            # 3. Покупаем импульс, не откат (RSI в зоне силы)
+            momentum = RSI_LOW <= rsi <= RSI_HIGH
+
+            # 4. Покупатели доминируют
+            buyers = plus_di[i] > minus_di[i]
+
+            # 5. Есть тренд (не боковик)
+            adx_ok = adxs[i] > ADX_MIN
+
+            # 6. Объём подтверждает (не тихое время)
+            vol_ok = vols[i] > vol_ma[i] * 0.9
+
+            if macro_up and trend_aligned and momentum and buyers and adx_ok and vol_ok:
                 pending = True
 
     # Закрываем остаток
@@ -282,7 +289,7 @@ def print_report(stats: dict) -> None:
     print(f"  Ср. потеря       : {stats['avg_loss_pct']:+.2f}%")
     print(f"  Ср. держание     : {stats['avg_hold_bars']:.0f} баров  "
           f"({stats['avg_hold_bars'] * 5 / 60:.1f} ч)")
-    print(f"  Безубыток (BE)   : {stats['be_trades']} сделок")
+    print(f"  Трейлинг (BE+)   : {stats['be_trades']} сделок")
     print(sep)
     print("  Причины выходов:")
     for reason, cnt in sorted(stats["exit_reasons"].items(), key=lambda x: -x[1]):

@@ -9,26 +9,28 @@ SLIPPAGE   = 0.0005
 
 # ADX
 ADX_PERIOD = 14
-ADX_MIN    = 20    # минимальный ADX для входа (есть хоть какой-то тренд)
+ADX_MIN    = 22
 
-# EMA фильтры тренда (на 5m данных)
-EMA_FAST         = 20    # ~100 мин
-EMA_SLOW         = 50    # ~250 мин
-EMA_MID          = 100   # ~500 мин  (~8ч)
-EMA_TREND_FILTER = 200   # ~1000 мин (~16ч) — макро тренд
+# EMA фильтры тренда (на 5m барах)
+EMA_FAST  = 20     # ~100 мин
+EMA_SLOW  = 50     # ~250 мин
+EMA_MID   = 100    # ~500 мин (~8 ч)
+EMA_MACRO = 2016   # 7 дней (7 * 24 * 12 = 2016 баров по 5m)
 
-# Bollinger Bands
+# RSI
+RSI_PERIOD = 14
+RSI_LOW    = 52    # нижняя граница зоны силы (покупаем импульс, не откат)
+RSI_HIGH   = 72    # верхняя граница (не гонимся за перекупленностью)
+
+# Bollinger Bands (только для индикатора, не для сигналов)
 BB_PERIOD = 20
 BB_STD    = 2.0
 
-# RSI
-RSI_PERIOD    = 14
-RSI_PULL_LOW  = 38   # нижняя граница зоны отката
-RSI_PULL_HIGH = 55   # верхняя граница зоны отката
-
 # Риск-менеджмент
-ATR_PERIOD    = 14
-SL_ATR        = 1.5
-TP_ATR        = 2.5
-MAX_HOLD_BARS = 36   # 3 часа принудительный выход
-POSITION_PCT  = 0.95
+ATR_PERIOD        = 14
+SL_ATR            = 2.0   # шире — меньше ложных стопов
+TP_ATR            = 3.0   # R:R = 1.5 (breakeven при WR > 40%)
+TRAIL_TRIGGER_ATR = 1.5   # при достижении +1.5 ATR — стоп в +0.5 ATR
+TRAIL_SL_ATR      = 0.5
+MAX_HOLD_BARS     = 48    # 4 часа
+POSITION_PCT      = 0.95

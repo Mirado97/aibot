@@ -19,8 +19,8 @@ EMA_1H_SLOPE   = 12    # наклон за 3 часа (12 × 15m)
 
 # RSI пороги
 RSI_PERIOD    = 14
-RSI_LONG_MAX  = 28
-RSI_SHORT_MIN = 72
+RSI_LONG_MAX  = 35
+RSI_SHORT_MIN = 65
 
 # BB
 BB_PERIOD = 20

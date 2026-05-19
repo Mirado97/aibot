@@ -274,7 +274,7 @@ def print_report(stats: dict) -> None:
 
     sep = "─" * 44
     print(f"\n{sep}")
-    print(f"  БЭКТЕСТ ETH/USDT:USDT  5m  |  MTF MeanRev")
+    print(f"  БЭКТЕСТ ETH/USDT:USDT  15m  |  MTF MeanRev")
     print(sep)
     print(f"  Сделок всего     : {stats['n_trades']}  "
           f"(L:{stats['n_long']} / S:{stats['n_short']})")

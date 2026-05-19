@@ -10,7 +10,7 @@ from config import (
     ATR_PERIOD, BB_PERIOD, BB_STD,
     CAPITAL, COMMISSION,
     EMA_1H, EMA_1H_SLOPE,
-    LEVERAGE, MAX_HOLD_BARS, OB_LOOKBACK, POSITION_PCT,
+    LEVERAGE, MAX_HOLD_BARS, POSITION_PCT,
     RSI_PERIOD,
     SL_PCT, SLIPPAGE, SWING_LEN, TP_PCT, TREND_EXIT_BARS,
 )
@@ -124,11 +124,11 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
     last_sh_i = 0
     last_sl   = np.nan   # последний подтверждённый swing low
     last_sl_i = 0
-    ob_active = False
-    ob_high   = np.nan
-    ob_low    = np.nan
-    ob_bias: Optional[str] = None
-    ob_born_i = 0
+    # S/R flip level (сломанный swing high/low становится опорой)
+    sr_level  = np.nan
+    sr_bias: Optional[str] = None
+    sr_active = False
+    sr_born_i = 0
 
     start = EMA_1H_SLOPE + SWING_LEN + 2
 
@@ -190,66 +190,56 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
                 last_sl   = pl_arr[conf]
                 last_sl_i = conf
 
-        # ── CHoCH: смена характера структуры ─────────────────────────────
+        # ── CHoCH: сломанный уровень становится S/R флипом ───────────────
         if not (np.isnan(last_sh) or np.isnan(last_sl)):
 
             if closes[i] > last_sh and bias <= 0:
-                # Бычий CHoCH: в медвежьей структуре цена пробила swing high
-                bias = 1
-                ob_active = False
-                lo_bound = max(last_sl_i, i - OB_LOOKBACK)
-                for k in range(i - 1, lo_bound - 1, -1):
-                    if opens[k] > closes[k]:   # медвежья свеча = бычий OB
-                        ob_high, ob_low   = highs[k], lows[k]
-                        ob_active         = True
-                        ob_bias           = "long"
-                        ob_born_i         = i
-                        break
+                # Бычий CHoCH: старый swing high = новая поддержка
+                bias      = 1
+                sr_level  = last_sh
+                sr_bias   = "long"
+                sr_active = True
+                sr_born_i = i
 
             elif closes[i] < last_sl and bias >= 0:
-                # Медвежий CHoCH: в бычьей структуре цена пробила swing low
-                bias = -1
-                ob_active = False
-                lo_bound = max(last_sh_i, i - OB_LOOKBACK)
-                for k in range(i - 1, lo_bound - 1, -1):
-                    if closes[k] > opens[k]:   # бычья свеча = медвежий OB
-                        ob_high, ob_low   = highs[k], lows[k]
-                        ob_active         = True
-                        ob_bias           = "short"
-                        ob_born_i         = i
-                        break
+                # Медвежий CHoCH: старый swing low = новое сопротивление
+                bias      = -1
+                sr_level  = last_sl
+                sr_bias   = "short"
+                sr_active = True
+                sr_born_i = i
 
-        # ── Инвалидация / истечение OB ───────────────────────────────────
-        if ob_active:
-            if   ob_bias == "long"  and lows[i]  < ob_low  * 0.998:
-                ob_active = False
-            elif ob_bias == "short" and highs[i] > ob_high * 1.002:
-                ob_active = False
-            elif i - ob_born_i > OB_LOOKBACK * 2:
-                ob_active = False
+        # ── Инвалидация / истечение S/R уровня ───────────────────────────
+        if sr_active:
+            if   sr_bias == "long"  and closes[i] < sr_level * 0.993:  # пробой ниже
+                sr_active = False
+            elif sr_bias == "short" and closes[i] > sr_level * 1.007:  # пробой выше
+                sr_active = False
+            elif i - sr_born_i > 40:                                   # истёк (10 ч)
+                sr_active = False
 
-        # ── Сигнал: ретест OB + EMA макро-фильтр ─────────────────────────
-        if pos is None and pending_side is None and ob_active:
+        # ── Сигнал: первое касание S/R уровня + EMA фильтр ───────────────
+        if pos is None and pending_side is None and sr_active:
             trend_up   = ema1h[i] > ema1h[i - EMA_1H_SLOPE]
             trend_down = ema1h[i] < ema1h[i - EMA_1H_SLOPE]
 
-            if (ob_bias == "long"
-                    and closes[i-1] > ob_high      # предыдущий бар был выше OB (первое касание)
-                    and lows[i]    <= ob_high       # текущий бар коснулся OB
-                    and closes[i]  >= ob_low        # закрылся внутри или выше OB
+            if (sr_bias == "long"
+                    and closes[i-1] > sr_level          # предыдущий бар выше уровня
+                    and lows[i]    <= sr_level * 1.002  # коснулся уровня
+                    and closes[i]  >= sr_level * 0.997  # не пробил
                     and trend_up):
                 pending_side  = "long"
-                pending_ob_sl = ob_low * 0.998
-                ob_active     = False
+                pending_ob_sl = sr_level * 0.993        # SL на 0.7% ниже уровня
+                sr_active     = False
 
-            elif (ob_bias == "short"
-                    and closes[i-1] < ob_low       # предыдущий бар был ниже OB (первое касание)
-                    and highs[i]   >= ob_low        # текущий бар коснулся OB
-                    and closes[i]  <= ob_high       # закрылся внутри или ниже OB
+            elif (sr_bias == "short"
+                    and closes[i-1] < sr_level          # предыдущий бар ниже уровня
+                    and highs[i]   >= sr_level * 0.998  # коснулся уровня
+                    and closes[i]  <= sr_level * 1.003  # не пробил
                     and trend_down):
                 pending_side  = "short"
-                pending_ob_sl = ob_high * 1.002
-                ob_active     = False
+                pending_ob_sl = sr_level * 1.007        # SL на 0.7% выше уровня
+                sr_active     = False
 
     if pos is not None:
         pos.exit_bar    = n - 1

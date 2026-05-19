@@ -17,6 +17,10 @@ EMA_SLOW         = 50    # ~250 мин
 EMA_MID          = 100   # ~500 мин  (~8ч)
 EMA_TREND_FILTER = 200   # ~1000 мин (~16ч) — макро тренд
 
+# Bollinger Bands
+BB_PERIOD = 20
+BB_STD    = 2.0
+
 # RSI
 RSI_PERIOD    = 14
 RSI_PULL_LOW  = 38   # нижняя граница зоны отката

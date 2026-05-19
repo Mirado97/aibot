@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use("Agg")  # headless — без дисплея (VPS/Docker)
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -66,7 +68,7 @@ def _plot(df, trades, equity) -> None:
     plt.tight_layout()
     plt.savefig("backtest_result.png", dpi=130)
     print("График сохранён: backtest_result.png")
-    plt.show()
+    plt.close()
 
 
 if __name__ == "__main__":

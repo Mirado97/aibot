@@ -28,7 +28,7 @@ def load_ohlcv() -> pd.DataFrame:
         print("Кэш устарел, докачиваю...")
 
     print(f"Загружаю {DAYS_BACK} дней {TIMEFRAME} {SYMBOL} с OKX …")
-    exchange = ccxt.okx({"enableRateLimit": True})
+    exchange = ccxt.okx({"enableRateLimit": True, "options": {"defaultType": "swap"}})
 
     since_ms = int(
         (datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)).timestamp() * 1000

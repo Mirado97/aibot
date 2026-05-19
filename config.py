@@ -3,8 +3,8 @@ TIMEFRAME = "5m"
 CAPITAL   = 300.0
 DAYS_BACK = 730
 
-COMMISSION = 0.0005
-SLIPPAGE   = 0.0003
+COMMISSION = 0.0002   # maker-ордер OKX futures (0.02%)
+SLIPPAGE   = 0.0002
 
 # ──────────────────────────────────────────────────────
 # СТРАТЕГИЯ: Multi-Timeframe Mean Reversion
@@ -14,13 +14,13 @@ SLIPPAGE   = 0.0003
 # ──────────────────────────────────────────────────────
 
 # Симуляция 1h тренда через EMA(144) на 5m барах
-EMA_1H         = 144   # 144 × 5m = 12 часов ≈ 1h тренд
+EMA_1H         = 144   # 144 × 5m = 12 часов
 EMA_1H_SLOPE   = 36    # наклон за 3 часа
 
-# RSI пороги (вход только в экстремальных зонах)
+# RSI пороги
 RSI_PERIOD    = 14
-RSI_LONG_MAX  = 33     # RSI дно для лонга
-RSI_SHORT_MIN = 67     # RSI пик для шорта
+RSI_LONG_MAX  = 33
+RSI_SHORT_MIN = 67
 
 # BB
 BB_PERIOD = 20
@@ -30,12 +30,14 @@ BB_STD    = 2.0
 ADX_PERIOD = 14
 ADX_MIN    = 15
 
-# Фиксированный % SL/TP
-SL_PCT         = 0.010   # 1.0% стоп
-TP_PCT         = 0.018   # 1.8% тейк  (R:R = 1.8, breakeven WR = 35.7%)
-TRAIL_TO_BE    = 0.007   # при +0.7% движении → стоп в безубыток
+# SL/TP — возвращаемся к параметрам, давшим 42.8% WR
+SL_PCT    = 0.020   # 2.0%
+TP_PCT    = 0.035   # 3.5%  (R:R = 1.75, breakeven WR = 36.4% с maker-комиссией)
 
-MAX_HOLD_BARS = 24       # 2 часа (было 4)
+# Выход по развороту тренда (вместо таймаута)
+TREND_EXIT_BARS = 6    # минимум баров в позиции перед trend exit
+
+MAX_HOLD_BARS = 48
 POSITION_PCT  = 0.95
 LEVERAGE      = 2
 

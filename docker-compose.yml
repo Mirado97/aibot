@@ -1,0 +1,8 @@
+services:
+  aibot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data       # кэш свечей сохраняется между перезапусками
+      - ./logs:/app/logs
+    restart: unless-stopped

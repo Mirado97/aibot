@@ -234,19 +234,21 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
             trend_down = ema1h[i] < ema1h[i - EMA_1H_SLOPE]
 
             if (ob_bias == "long"
-                    and lows[i]  <= ob_high        # цена дотянулась до OB
-                    and closes[i] >= ob_low        # не пробила OB насквозь
+                    and closes[i-1] > ob_high      # предыдущий бар был выше OB (первое касание)
+                    and lows[i]    <= ob_high       # текущий бар коснулся OB
+                    and closes[i]  >= ob_low        # закрылся внутри или выше OB
                     and trend_up):
                 pending_side  = "long"
-                pending_ob_sl = ob_low * 0.998     # SL под OB
+                pending_ob_sl = ob_low * 0.998
                 ob_active     = False
 
             elif (ob_bias == "short"
-                    and highs[i] >= ob_low         # цена дотянулась до OB
-                    and closes[i] <= ob_high       # не пробила OB насквозь
+                    and closes[i-1] < ob_low       # предыдущий бар был ниже OB (первое касание)
+                    and highs[i]   >= ob_low        # текущий бар коснулся OB
+                    and closes[i]  <= ob_high       # закрылся внутри или ниже OB
                     and trend_down):
                 pending_side  = "short"
-                pending_ob_sl = ob_high * 1.002    # SL над OB
+                pending_ob_sl = ob_high * 1.002
                 ob_active     = False
 
     if pos is not None:

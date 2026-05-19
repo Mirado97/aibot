@@ -189,18 +189,16 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
             rsi_turned_up   = (rsis[i] >= rsis[i-1] + 1.5) and rsis[i-1] <= RSI_LONG_MAX
             rsi_turned_down = (rsis[i] <= rsis[i-1] - 1.5) and rsis[i-1] >= RSI_SHORT_MIN
 
-            # LONG: тренд вверх + RSI реально развернулся + бар сигнала бычий + ниже BB
+            # LONG: тренд вверх + RSI реально развернулся + ниже BB
             if (trend_up
                     and rsi_turned_up
-                    and closes[i] > opens[i]          # бар подтверждает разворот ценой
                     and closes[i-1] < bb_lo[i-1]
                     and adx_ok):
                 pending_side = "long"
 
-            # SHORT: тренд вниз + RSI реально развернулся + бар сигнала медвежий + выше BB
+            # SHORT: тренд вниз + RSI реально развернулся + выше BB
             elif (trend_down
                     and rsi_turned_down
-                    and closes[i] < opens[i]          # бар подтверждает разворот ценой
                     and closes[i-1] > bb_up[i-1]
                     and adx_ok):
                 pending_side = "short"

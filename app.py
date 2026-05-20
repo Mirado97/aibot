@@ -114,7 +114,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
         fig.update_xaxes(gridcolor="#1f2937", zeroline=False, row=i, col=1)
         fig.update_yaxes(gridcolor="#1f2937", zeroline=False, row=i, col=1)
 
-    chart_html = pio.to_html(fig, full_html=False, include_plotlyjs="cdn")
+    chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=True)
 
     s = stats or {}
     pf_color = "color:#4CAF50" if s.get("profit_factor", 0) >= 1 else "color:#ef5350"

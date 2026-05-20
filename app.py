@@ -127,7 +127,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
         fig.update_xaxes(gridcolor="#1f2937", zeroline=False, row=i, col=1)
         fig.update_yaxes(gridcolor="#1f2937", zeroline=False, row=i, col=1)
 
-    chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
+    chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=True)
 
     s = stats or {}
     pf_color = "color:#4CAF50" if s.get("profit_factor", 0) >= 1 else "color:#ef5350"
@@ -208,7 +208,6 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
   <div class="metric"><div class="label">Sharpe</div><div class="value">{s.get('sharpe',0):.2f}</div></div>
   <div class="metric"><div class="label">SL / TP</div><div class="value">{sl_pct*100:.1f}% / {tp_pct*100:.1f}%</div></div>
 </div>
-<script src="/static/plotly.min.js"></script>
 <div class="section">CHART_PLACEHOLDER</div>
 <div class="section">
   <h2 style="font-size:15px">Ордера ({len(trades)} всего)</h2>

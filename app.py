@@ -108,27 +108,7 @@ def _make_page() -> str:
 {_stats_row(_stats_tr,  f"Трейлинг: trigger +{TRAIL_TRIGGER*100:.1f}% → безубыток, dist {TRAIL_DIST*100:.1f}%, потолок TP {TRAIL_TP*100:.0f}%")}
 
 <!-- TradingView Widget -->
-<div class="tradingview-widget-container" style="height:520px;margin-top:8px">
-  <div id="tv_chart" style="height:100%"></div>
-  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-  <script type="text/javascript">
-    new TradingView.widget({{
-      "container_id": "tv_chart",
-      "width": "100%",
-      "height": 520,
-      "symbol": "OKEX:ETHUSDT.P",
-      "interval": "240",
-      "timezone": "Europe/Kiev",
-      "theme": "dark",
-      "style": "1",
-      "locale": "ru",
-      "toolbar_bg": "#1f2937",
-      "enable_publishing": false,
-      "hide_side_toolbar": false,
-      "studies": ["MACD@tv-basicstudies"]
-    }});
-  </script>
-</div>
+<div id="tv_chart" style="height:520px;margin-top:8px"></div>
 
 <div class="wrap">
   <p style="padding:8px 0 4px;font-size:13px">Ордера — Фикс TP ({len(_trades_fix)})</p>
@@ -148,6 +128,24 @@ def _make_page() -> str:
   </table>
 </div>
 
+<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+<script type="text/javascript">
+  new TradingView.widget({{
+    "container_id": "tv_chart",
+    "width": "100%",
+    "height": 520,
+    "symbol": "OKEX:ETHUSDT.P",
+    "interval": "240",
+    "timezone": "Europe/Kiev",
+    "theme": "dark",
+    "style": "1",
+    "locale": "ru",
+    "toolbar_bg": "#1f2937",
+    "enable_publishing": false,
+    "hide_side_toolbar": false,
+    "studies": ["MACD@tv-basicstudies"]
+  }});
+</script>
 </body>
 </html>"""
 

@@ -173,7 +173,6 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AIBot Dashboard</title>
-<script src="/static/plotly.min.js"></script>
 <style>
   body{{margin:0;background:#0e1117;color:#e0e0e0;font-family:sans-serif;font-size:13px}}
   h1{{margin:12px 16px 4px;font-size:18px;color:#00bcd4}}
@@ -209,6 +208,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
   <div class="metric"><div class="label">Sharpe</div><div class="value">{s.get('sharpe',0):.2f}</div></div>
   <div class="metric"><div class="label">SL / TP</div><div class="value">{sl_pct*100:.1f}% / {tp_pct*100:.1f}%</div></div>
 </div>
+<script src="/static/plotly.min.js"></script>
 <div class="section">CHART_PLACEHOLDER</div>
 <div class="section">
   <h2 style="font-size:15px">Ордера ({len(trades)} всего)</h2>

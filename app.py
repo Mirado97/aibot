@@ -9,28 +9,16 @@ import macd_bt as mb
 
 app = Flask(__name__)
 
-SYMBOL        = "ETH/USDT:USDT"
-SL_PCT        = 0.010
-TP_PCT        = 0.020
-TRAIL_TRIGGER = 0.020
-TRAIL_DIST    = 0.020
-TRAIL_TP      = 0.100
+SYMBOL = "ETH/USDT:USDT"
+SL_PCT = 0.010
+TP_PCT = 0.020
 
 print("Загрузка данных…", flush=True)
 _df_raw = load_ohlcv(SYMBOL)
 _df     = mb.add_indicators(_df_raw)
-
 _trades, _equity = mb.run_backtest(_df, sl_pct=SL_PCT, tp_pct=TP_PCT)
 _stats  = mb.calc_stats(_trades, _equity)
-
-_trades_tr, _equity_tr = mb.run_backtest(
-    _df, sl_pct=SL_PCT, tp_pct=TRAIL_TP,
-    trail_trigger_pct=TRAIL_TRIGGER, trail_dist_pct=TRAIL_DIST,
-)
-_stats_tr = mb.calc_stats(_trades_tr, _equity_tr)
-
-print(f"Фикс: {_stats['n_trades']} сделок  PF={_stats['profit_factor']:.2f}", flush=True)
-print(f"Трейл: {_stats_tr['n_trades']} сделок  PF={_stats_tr['profit_factor']:.2f}", flush=True)
+print(f"Сделок: {_stats['n_trades']}", flush=True)
 
 
 def _make_page() -> str:
@@ -53,13 +41,9 @@ def _make_page() -> str:
             f"</tr>"
         )
 
-    s     = _stats
-    pf_c  = "#4CAF50" if s.get("profit_factor", 0) >= 1 else "#ef5350"
-    rt_c  = "#4CAF50" if s.get("total_return",  0) >= 0 else "#ef5350"
-
-    st    = _stats_tr
-    pf_ct = "#4CAF50" if st.get("profit_factor", 0) >= 1 else "#ef5350"
-    rt_ct = "#4CAF50" if st.get("total_return",  0) >= 0 else "#ef5350"
+    s    = _stats
+    pf_c = "#4CAF50" if s.get("profit_factor", 0) >= 1 else "#ef5350"
+    rt_c = "#4CAF50" if s.get("total_return",  0) >= 0 else "#ef5350"
 
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -71,7 +55,6 @@ def _make_page() -> str:
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{background:#0e1117;color:#e0e0e0;font-family:sans-serif;font-size:13px}}
   h1{{padding:8px 12px;font-size:16px;color:#00bcd4}}
-  .lbl{{padding:4px 12px 0;font-size:11px;color:#555}}
   .m{{display:flex;gap:20px;padding:6px 12px 8px;background:#111827;flex-wrap:wrap}}
   .mi .l{{font-size:11px;color:#888}}
   .mi .v{{font-size:15px;font-weight:bold}}
@@ -84,9 +67,8 @@ def _make_page() -> str:
 </head>
 <body>
 
-<h1>AIBot MACD | {SYMBOL} | SL {SL_PCT*100:.1f}%</h1>
+<h1>AIBot MACD | {SYMBOL} | SL {SL_PCT*100:.1f}% TP {TP_PCT*100:.1f}%</h1>
 
-<div class="lbl">Фикс TP {TP_PCT*100:.1f}%</div>
 <div class="m">
   <div class="mi"><div class="l">Сделок</div><div class="v">{s.get('n_trades',0)}</div></div>
   <div class="mi"><div class="l">Win Rate</div><div class="v">{s.get('win_rate',0):.1f}%</div></div>
@@ -94,16 +76,6 @@ def _make_page() -> str:
   <div class="mi"><div class="l">Доходность</div><div class="v" style="color:{rt_c}">{s.get('total_return',0):+.1f}%</div></div>
   <div class="mi"><div class="l">Max DD</div><div class="v" style="color:#ef5350">{s.get('max_drawdown',0):.1f}%</div></div>
   <div class="mi"><div class="l">Sharpe</div><div class="v">{s.get('sharpe',0):.2f}</div></div>
-</div>
-
-<div class="lbl">Трейлинг (trigger +{TRAIL_TRIGGER*100:.0f}% → безубыток, dist {TRAIL_DIST*100:.0f}%, потолок {TRAIL_TP*100:.0f}%)</div>
-<div class="m">
-  <div class="mi"><div class="l">Сделок</div><div class="v">{st.get('n_trades',0)}</div></div>
-  <div class="mi"><div class="l">Win Rate</div><div class="v">{st.get('win_rate',0):.1f}%</div></div>
-  <div class="mi"><div class="l">Profit Factor</div><div class="v" style="color:{pf_ct}">{st.get('profit_factor',0):.2f}</div></div>
-  <div class="mi"><div class="l">Доходность</div><div class="v" style="color:{rt_ct}">{st.get('total_return',0):+.1f}%</div></div>
-  <div class="mi"><div class="l">Max DD</div><div class="v" style="color:#ef5350">{st.get('max_drawdown',0):.1f}%</div></div>
-  <div class="mi"><div class="l">Sharpe</div><div class="v">{st.get('sharpe',0):.2f}</div></div>
 </div>
 
 <!-- TradingView Widget -->

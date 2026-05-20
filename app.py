@@ -1,9 +1,13 @@
-"""Flask dashboard."""
-import warnings, time, json, os
+"""Flask dashboard — server-side PNG charts via matplotlib."""
+import warnings, io, base64, os
 warnings.filterwarnings("ignore")
 
-from flask import Flask, Response
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
+from flask import Flask, Response
 
 from data import load_ohlcv
 import macd_bt as mb
@@ -15,7 +19,9 @@ SL_PCT    = 0.010
 TP_PCT    = 0.020
 DAYS_VIEW = 90
 
-# ── Старт: загрузка + бэктест + генерация страницы ────────────────────────────
+BG   = "#0e1117"
+GRID = "#1f2937"
+
 print("Загрузка данных…", flush=True)
 _df_raw = load_ohlcv(SYMBOL)
 _df     = mb.add_indicators(_df_raw)
@@ -24,66 +30,93 @@ _stats  = mb.calc_stats(_trades, _equity)
 print(f"Сделок: {_stats['n_trades']}", flush=True)
 
 
+def _fig_to_b64(fig) -> str:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=BG)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode()
+
 
 def _make_page() -> str:
     cutoff = _df.index[-1] - pd.Timedelta(days=DAYS_VIEW)
 
-    # 4h свечи для графика (540 баров вместо 8640)
     df4h = _df_raw.resample("4h").agg(
-        {"open":"first","high":"max","low":"min","close":"last"}
+        {"open": "first", "high": "max", "low": "min", "close": "last"}
     ).dropna()
     dv4h = df4h[df4h.index >= cutoff]
 
-    candles = [{"time": int(ts.timestamp()),
-                "open": round(float(r.open),2), "high": round(float(r.high),2),
-                "low":  round(float(r.low),2),  "close": round(float(r.close),2)}
-               for ts, r in dv4h.iterrows()]
-
-    # MACD
     c4h   = df4h["close"]
-    macd_ = c4h.ewm(span=12,adjust=False).mean() - c4h.ewm(span=26,adjust=False).mean()
-    sig_  = macd_.ewm(span=9,adjust=False).mean()
+    macd_ = c4h.ewm(span=12, adjust=False).mean() - c4h.ewm(span=26, adjust=False).mean()
+    sig_  = macd_.ewm(span=9, adjust=False).mean()
     hist_ = macd_ - sig_
-    macd_data = [{"time": int(ts.timestamp()), "value": round(float(v),4)}
-                 for ts, v in macd_[dv4h.index].items()]
-    sig_data  = [{"time": int(ts.timestamp()), "value": round(float(v),4)}
-                 for ts, v in sig_[dv4h.index].items()]
-    hist_data = [{"time": int(ts.timestamp()), "value": round(float(v),4),
-                  "color": "#26a69a" if v>=0 else "#ef5350"}
-                 for ts, v in hist_[dv4h.index].items()]
+    macd_v = macd_[dv4h.index]
+    sig_v  = sig_[dv4h.index]
+    hist_v = hist_[dv4h.index]
 
-    # Equity (по 4h бару)
     eq = pd.Series(_equity, index=_df.index).resample("4h").last().dropna()
-    eq_view = eq[eq.index >= cutoff]
-    eq_data = [{"time": int(ts.timestamp()), "value": round(float(v),2)}
-               for ts, v in eq_view.items()]
+    eq_v = eq[eq.index >= cutoff]
 
-    # Маркеры → округляем до ближайшего 4h бара
-    def to4h(bar_idx):
-        t = _df.index[bar_idx]
-        return int(t.floor("4h").timestamp())
+    # ── Цена + маркеры ─────────────────────────────────────────────────────
+    fig1, ax1 = plt.subplots(figsize=(14, 4), facecolor=BG)
+    ax1.set_facecolor(BG)
+    ax1.plot(dv4h.index, dv4h["close"], color="#26a69a", linewidth=1)
 
-    markers = []
     for t in _trades:
-        if _df.index[t.entry_bar] < cutoff:
+        entry_t = _df.index[t.entry_bar]
+        if entry_t < cutoff:
             continue
-        markers.append({"time": to4h(t.entry_bar),
-            "position": "belowBar" if t.side=="long" else "aboveBar",
-            "color": "#2196F3" if t.side=="long" else "#FF9800",
-            "shape": "arrowUp" if t.side=="long" else "arrowDown",
-            "text": "L" if t.side=="long" else "S"})
-        if t.exit_bar and _df.index[t.exit_bar] >= cutoff:
-            markers.append({"time": to4h(t.exit_bar),
-                "position": "aboveBar" if t.is_win else "belowBar",
-                "color": "#4CAF50" if t.is_win else "#ef5350",
-                "shape": "circle", "text": "W" if t.is_win else "X"})
-    markers.sort(key=lambda x: x["time"])
+        ep = t.entry_price
+        color = "#2196F3" if t.side == "long" else "#FF9800"
+        marker = "^" if t.side == "long" else "v"
+        ax1.scatter(entry_t, ep, color=color, marker=marker, s=40, zorder=5)
+        if t.exit_bar and t.exit_price:
+            exit_t = _df.index[t.exit_bar]
+            if exit_t >= cutoff:
+                ec = "#4CAF50" if t.is_win else "#ef5350"
+                ax1.scatter(exit_t, t.exit_price, color=ec, marker="o", s=25, zorder=5)
 
-    # Таблица
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    ax1.tick_params(colors="#9ca3af", labelsize=8)
+    ax1.grid(color=GRID, linewidth=0.5)
+    for sp in ax1.spines.values():
+        sp.set_color(GRID)
+    ax1.set_title("ETH/USDT 4h", color="#9ca3af", fontsize=9, pad=4)
+    img1 = _fig_to_b64(fig1)
+
+    # ── MACD ───────────────────────────────────────────────────────────────
+    fig2, ax2 = plt.subplots(figsize=(14, 2.2), facecolor=BG)
+    ax2.set_facecolor(BG)
+    colors = ["#26a69a" if v >= 0 else "#ef5350" for v in hist_v]
+    ax2.bar(hist_v.index, hist_v.values, color=colors, width=pd.Timedelta(hours=3.5))
+    ax2.plot(macd_v.index, macd_v.values, color="#2196F3", linewidth=0.8)
+    ax2.plot(sig_v.index,  sig_v.values,  color="#FF9800", linewidth=0.8)
+    ax2.axhline(0, color=GRID, linewidth=0.5)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    ax2.tick_params(colors="#9ca3af", labelsize=8)
+    ax2.grid(color=GRID, linewidth=0.5)
+    for sp in ax2.spines.values():
+        sp.set_color(GRID)
+    ax2.set_title("MACD(12,26,9)", color="#9ca3af", fontsize=9, pad=4)
+    img2 = _fig_to_b64(fig2)
+
+    # ── Equity ─────────────────────────────────────────────────────────────
+    fig3, ax3 = plt.subplots(figsize=(14, 1.8), facecolor=BG)
+    ax3.set_facecolor(BG)
+    ax3.fill_between(eq_v.index, eq_v.values, alpha=0.3, color="#7E57C2")
+    ax3.plot(eq_v.index, eq_v.values, color="#7E57C2", linewidth=1)
+    ax3.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    ax3.tick_params(colors="#9ca3af", labelsize=8)
+    ax3.grid(color=GRID, linewidth=0.5)
+    for sp in ax3.spines.values():
+        sp.set_color(GRID)
+    ax3.set_title("Equity", color="#9ca3af", fontsize=9, pad=4)
+    img3 = _fig_to_b64(fig3)
+
+    # ── Таблица ────────────────────────────────────────────────────────────
     rows = ""
-    for t in list(t for t in _trades if t.exit_reason=="end_of_data") + \
-             list(reversed([t for t in _trades if t.exit_reason!="end_of_data"])):
-        sc = "#2196F3" if t.side=="long" else "#FF9800"
+    for t in list(t for t in _trades if t.exit_reason == "end_of_data") + \
+             list(reversed([t for t in _trades if t.exit_reason != "end_of_data"])):
+        sc = "#2196F3" if t.side == "long" else "#FF9800"
         pc = "#4CAF50" if t.is_win else "#ef5350"
         xts = _df.index[t.exit_bar].strftime("%m-%d %H:%M") if t.exit_bar else "—"
         xpx = f"{t.exit_price:.2f}" if t.exit_price else "—"
@@ -94,28 +127,21 @@ def _make_page() -> str:
                  f"<td>{t.exit_reason or 'open'}</td></tr>")
 
     s    = _stats
-    pf_c = "#4CAF50" if s.get("profit_factor",0)>=1 else "#ef5350"
-    rt_c = "#4CAF50" if s.get("total_return",0)>=0  else "#ef5350"
+    pf_c = "#4CAF50" if s.get("profit_factor", 0) >= 1 else "#ef5350"
+    rt_c = "#4CAF50" if s.get("total_return", 0) >= 0  else "#ef5350"
 
-    cj = json.dumps(candles)
-    mj = json.dumps(markers)
-    hj = json.dumps(hist_data)
-    aj = json.dumps(macd_data)
-    gj = json.dumps(sig_data)
-    ej = json.dumps(eq_data)
-
-    html = (
+    return (
         "<!DOCTYPE html><html lang='ru'><head>"
         "<meta charset='UTF-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>AIBot</title>"
         "<style>"
         "*{box-sizing:border-box;margin:0;padding:0}"
-        "body{background:#0e1117;color:#e0e0e0;font-family:sans-serif;font-size:13px}"
+        f"body{{background:{BG};color:#e0e0e0;font-family:sans-serif;font-size:13px}}"
         "h1{padding:8px 12px;font-size:16px;color:#00bcd4}"
         ".m{display:flex;gap:20px;padding:6px 12px 8px;background:#111827;flex-wrap:wrap}"
         ".mi .l{font-size:11px;color:#888}.mi .v{font-size:15px;font-weight:bold}"
-        ".lbl{padding:2px 12px;font-size:11px;color:#666}"
+        "img{width:100%;display:block}"
         "table{width:100%;border-collapse:collapse;font-size:12px}"
         "th{background:#1f2937;padding:5px 8px;text-align:left}"
         "td{padding:4px 8px;border-bottom:1px solid #1a2030}"
@@ -131,46 +157,17 @@ def _make_page() -> str:
         f"<div class='mi'><div class='l'>Max DD</div><div class='v' style='color:#ef5350'>{s.get('max_drawdown',0):.1f}%</div></div>"
         f"<div class='mi'><div class='l'>Sharpe</div><div class='v'>{s.get('sharpe',0):.2f}</div></div>"
         "</div>"
-        "<div id='dbg' style='color:lime;background:#111;font-family:monospace;font-size:12px;padding:4px 12px'></div>"
-        "<div class='lbl'>Цена ETH 4h — 90 дней</div><div id='c1' style='width:100%;height:360px'></div>"
-        "<div class='lbl'>MACD 4h</div><div id='c2' style='width:100%;height:140px'></div>"
-        "<div class='lbl'>Equity</div><div id='c3' style='width:100%;height:120px'></div>"
+        f"<img src='data:image/png;base64,{img1}'>"
+        f"<img src='data:image/png;base64,{img2}'>"
+        f"<img src='data:image/png;base64,{img3}'>"
         "<div class='wrap'>"
         f"<p style='padding:8px 0 4px;font-size:13px'>Ордера ({len(_trades)})</p>"
         "<table><tr><th>Вход</th><th>Выход</th><th>Сторона</th>"
         "<th>Вход $</th><th>Выход $</th><th>PnL %</th><th>Причина</th></tr>"
         + rows +
         "</table></div>"
-        "<script src='/static/lw-charts.js'></script>"
-        "<script>"
-        "var D=document.getElementById('dbg');"
-        "D.innerText='LW: '+typeof LightweightCharts;"
-        "try{"
-        "var OPT={"
-        "layout:{background:{color:'#0e1117'},textColor:'#9ca3af'},"
-        "grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},"
-        "timeScale:{timeVisible:true,secondsVisible:false},crosshair:{mode:1}};"
-        f"var ch1=LightweightCharts.createChart(document.getElementById('c1'),Object.assign({{height:360}},OPT));"
-        "var cs=ch1.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',"
-        "borderUpColor:'#26a69a',borderDownColor:'#ef5350',wickUpColor:'#26a69a',wickDownColor:'#ef5350'});"
-        f"cs.setData({cj});cs.setMarkers({mj});"
-        f"var ch2=LightweightCharts.createChart(document.getElementById('c2'),Object.assign({{height:140}},OPT));"
-        f"var hb=ch2.addHistogramSeries({{priceLineVisible:false,lastValueVisible:false}});"
-        f"var ml=ch2.addLineSeries({{color:'#2196F3',lineWidth:1,priceLineVisible:false,lastValueVisible:false}});"
-        f"var sl=ch2.addLineSeries({{color:'#FF9800',lineWidth:1,priceLineVisible:false,lastValueVisible:false}});"
-        f"hb.setData({hj});ml.setData({aj});sl.setData({gj});"
-        f"var ch3=LightweightCharts.createChart(document.getElementById('c3'),Object.assign({{height:120}},OPT));"
-        f"var es=ch3.addAreaSeries({{lineColor:'#7E57C2',topColor:'rgba(126,87,194,0.3)',bottomColor:'rgba(126,87,194,0)',lineWidth:2}});"
-        f"es.setData({ej});"
-        "[ch1,ch2,ch3].forEach(function(c,i){c.timeScale().subscribeVisibleLogicalRangeChange(function(r){"
-        "if(!r)return;[ch1,ch2,ch3].forEach(function(cc,j){if(i!==j)cc.timeScale().setVisibleLogicalRange(r);});});});"
-        "window.addEventListener('resize',function(){[ch1,ch2,ch3].forEach(function(c){c.applyOptions({});});});"
-        "D.innerText='OK — charts rendered';"
-        "}catch(e){D.style.color='red';D.innerText='ERROR: '+e.message;}"
-        "</script>"
         "</body></html>"
     )
-    return html
 
 
 print("Генерация страницы…", flush=True)

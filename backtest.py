@@ -39,9 +39,18 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # Объём MA
     df["vol_ma"] = v.rolling(VOL_PERIOD).mean()
 
-    # Пробойные уровни: максимум/минимум предыдущих N баров (shift(1) = без текущего)
+    # Уровни консолидации (предыдущие N баров, без текущего)
     df["break_high"] = h.rolling(BREAKOUT_BARS).max().shift(1)
     df["break_low"]  = l.rolling(BREAKOUT_BARS).min().shift(1)
+
+    # Сырой флаг пробоя
+    bo_up_raw = (c > df["break_high"]).astype(int)
+    bo_dn_raw = (c < df["break_low"]).astype(int)
+
+    # Свежий пробой = пробой сейчас + не было пробоев в предыдущих BREAKOUT_BARS барах
+    # (cooldown: после пробоя следующий сигнал возможен не раньше чем через N баров)
+    df["bo_up"]   = (bo_up_raw == 1) & (bo_up_raw.rolling(BREAKOUT_BARS).max().shift(1) == 0)
+    df["bo_down"] = (bo_dn_raw == 1) & (bo_dn_raw.rolling(BREAKOUT_BARS).max().shift(1) == 0)
 
     return df.dropna(subset=["atr", "ema_trend", "rsi", "vol_ma", "break_high", "break_low"])
 
@@ -84,17 +93,19 @@ class Trade:
 # ── Engine ───────────────────────────────────────────────────────────────────
 
 def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
-    opens       = df["open"].values
-    highs       = df["high"].values
-    lows        = df["low"].values
-    closes      = df["close"].values
-    atr         = df["atr"].values
-    ema_trend   = df["ema_trend"].values
-    rsi         = df["rsi"].values
-    volume      = df["volume"].values
-    vol_ma      = df["vol_ma"].values
-    break_high  = df["break_high"].values
-    break_low   = df["break_low"].values
+    opens      = df["open"].values
+    highs      = df["high"].values
+    lows       = df["low"].values
+    closes     = df["close"].values
+    atr        = df["atr"].values
+    ema_trend  = df["ema_trend"].values
+    rsi        = df["rsi"].values
+    volume     = df["volume"].values
+    vol_ma     = df["vol_ma"].values
+    break_high = df["break_high"].values
+    break_low  = df["break_low"].values
+    bo_up_arr  = df["bo_up"].values
+    bo_dn_arr  = df["bo_down"].values
 
     n         = len(df)
     equity    = np.full(n, np.nan)
@@ -103,30 +114,44 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
 
     trades: list[Trade]         = []
     pos:    Optional[Trade]     = None
-    pending_side: Optional[str] = None
+    pending_side:  Optional[str] = None
+    pending_bo_sl: float         = np.nan   # структурный SL от пробойного уровня
 
     trail_sl:   float = np.nan
     peak_price: float = np.nan
 
-    start = EMA_TREND + BREAKOUT_BARS + 2
+    start = EMA_TREND + BREAKOUT_BARS * 2 + 2
 
     for i in range(start, n):
 
         # ── Entry ────────────────────────────────────────────────────────
         if pending_side and pos is None:
-            entry   = opens[i]
-            side    = pending_side
-            sl_dist = ATR_SL_MULT * atr[i - 1]
+            entry = opens[i]
+            side  = pending_side
 
-            # Отклоняем если SL слишком мал для покрытия комиссий
-            if sl_dist / entry < (COMMISSION + SLIPPAGE) * 3:
-                pending_side = None
+            # Структурный SL: граница консолидации перед пробоем
+            # Ограничен ATR_SL_MULT × ATR чтобы не брать слишком широкий диапазон
+            if side == "long":
+                sl_structural = pending_bo_sl                  # break_low = дно диапазона
+                sl_atr        = entry - ATR_SL_MULT * atr[i-1]
+                sl = max(sl_structural, sl_atr)                # тighter из двух
             else:
-                sl = entry - sl_dist if side == "long" else entry + sl_dist
+                sl_structural = pending_bo_sl                  # break_high = потолок диапазона
+                sl_atr        = entry + ATR_SL_MULT * atr[i-1]
+                sl = min(sl_structural, sl_atr)
+
+            sl_dist = abs(entry - sl)
+
+            # Отклоняем если SL слишком мал (комиссии съедят всё)
+            if sl_dist / entry < (COMMISSION + SLIPPAGE) * 3:
+                pending_side  = None
+                pending_bo_sl = np.nan
+            else:
                 pos        = Trade(side=side, entry_bar=i, entry_price=entry, sl_price=sl)
                 trail_sl   = sl
                 peak_price = entry
-                pending_side = None
+                pending_side  = None
+                pending_bo_sl = np.nan
 
         # ── Position management ──────────────────────────────────────────
         if pos is not None:
@@ -150,16 +175,15 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
                 # Безубыток при 1R
                 if peak_price >= pos.entry_price + sl_dist_orig:
                     trail_sl = max(trail_sl, pos.entry_price)
-                # Trailing: тянем за пиком
+                # Trailing: стоп подтягивается за пиком
                 trail_sl = max(trail_sl, peak_price - ATR_TRAIL_MULT * atr[i])
 
-                if   opens[i] <= trail_sl:                                    _close(opens[i], "sl_gap")
-                elif lo <= trail_sl:                                          _close(trail_sl, "sl")
-                elif bars_in >= MAX_HOLD_BARS:                                _close(cl,       "timeout")
-                # Выход при развороте тренда (после минимального удержания)
+                if   opens[i] <= trail_sl:                                            _close(opens[i], "sl_gap")
+                elif lo <= trail_sl:                                                  _close(trail_sl, "sl")
+                elif bars_in >= MAX_HOLD_BARS:                                        _close(cl,       "timeout")
                 elif (bars_in >= MIN_HOLD_BARS
-                        and closes[i] < ema_trend[i]
-                        and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE]):  _close(cl,       "trend_exit")
+                      and closes[i] < ema_trend[i]
+                      and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE]):             _close(cl,       "trend_exit")
 
             else:  # short
                 peak_price = min(peak_price, lo)
@@ -167,16 +191,16 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
                     trail_sl = min(trail_sl, pos.entry_price)
                 trail_sl = min(trail_sl, peak_price + ATR_TRAIL_MULT * atr[i])
 
-                if   opens[i] >= trail_sl:                                    _close(opens[i], "sl_gap")
-                elif hi >= trail_sl:                                          _close(trail_sl, "sl")
-                elif bars_in >= MAX_HOLD_BARS:                                _close(cl,       "timeout")
+                if   opens[i] >= trail_sl:                                            _close(opens[i], "sl_gap")
+                elif hi >= trail_sl:                                                  _close(trail_sl, "sl")
+                elif bars_in >= MAX_HOLD_BARS:                                        _close(cl,       "timeout")
                 elif (bars_in >= MIN_HOLD_BARS
-                        and closes[i] > ema_trend[i]
-                        and ema_trend[i] > ema_trend[i - EMA_TREND_SLOPE]):  _close(cl,       "trend_exit")
+                      and closes[i] > ema_trend[i]
+                      and ema_trend[i] > ema_trend[i - EMA_TREND_SLOPE]):             _close(cl,       "trend_exit")
 
         equity[i] = capital
 
-        # ── Signal: свежий пробой N-bar high/low ─────────────────────────
+        # ── Signal: свежий пробой после консолидации ──────────────────────
         if pos is None and pending_side is None:
             vol_ok     = volume[i] > vol_ma[i] * VOL_MULT
             trend_up   = (closes[i] > ema_trend[i]
@@ -184,15 +208,19 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
             trend_down = (closes[i] < ema_trend[i]
                           and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE])
 
-            # Свежий пробой: текущий бар пробил, предыдущий — нет
-            bo_up   = closes[i] > break_high[i] and closes[i-1] <= break_high[i-1]
-            bo_down = closes[i] < break_low[i]  and closes[i-1] >= break_low[i-1]
+            if (bo_up_arr[i]
+                    and RSI_LONG_MIN  < rsi[i] < RSI_LONG_MAX
+                    and vol_ok
+                    and trend_up):
+                pending_side  = "long"
+                pending_bo_sl = break_low[i]   # дно консолидации = структурный SL
 
-            if bo_up and RSI_LONG_MIN < rsi[i] < RSI_LONG_MAX and vol_ok and trend_up:
-                pending_side = "long"
-
-            elif bo_down and RSI_SHORT_MIN < rsi[i] < RSI_SHORT_MAX and vol_ok and trend_down:
-                pending_side = "short"
+            elif (bo_dn_arr[i]
+                    and RSI_SHORT_MIN < rsi[i] < RSI_SHORT_MAX
+                    and vol_ok
+                    and trend_down):
+                pending_side  = "short"
+                pending_bo_sl = break_high[i]  # потолок консолидации = структурный SL
 
     if pos is not None:
         pos.exit_bar    = n - 1

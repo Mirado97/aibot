@@ -120,7 +120,6 @@ def build_page() -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AIBot Dashboard</title>
-<script src="/static/lw-charts.js"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0e1117;color:#e0e0e0;font-family:sans-serif;font-size:13px}}
@@ -156,6 +155,7 @@ tr:hover td{{background:#1a2030}}
   <table><tr><th>Вход</th><th>Выход</th><th>Сторона</th><th>Вход $</th><th>Выход $</th><th>PnL %</th><th>Причина</th></tr>
   {rows}</table>
 </div>
+<script src="/static/lw-charts.js"></script>
 <script>
 const W = document.body.clientWidth - 16;
 const OPT = {{

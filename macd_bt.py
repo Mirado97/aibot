@@ -97,6 +97,7 @@ class Trade:
     exit_bar:    Optional[int]   = None
     exit_price:  Optional[float] = None
     exit_reason: Optional[str]   = None
+    best_price:  Optional[float] = None   # для трейлинга
 
     @property
     def pnl_pct(self) -> float:
@@ -125,6 +126,8 @@ def run_backtest(
     df: pd.DataFrame,
     sl_pct: float = SL_PCT,
     tp_pct: float = TP_PCT,
+    trail_trigger_pct: float = 0.0,   # при каком движении в пользу включить трейлинг (0 = откл)
+    trail_dist_pct:    float = 0.0,   # расстояние трейлинга от пика (0 = откл)
 ) -> tuple[list[Trade], np.ndarray]:
     opens        = df["open"].values
     highs        = df["high"].values
@@ -174,6 +177,23 @@ def run_backtest(
                 capital = capital * (1 + POSITION_PCT * pos.pnl_pct)
                 trades.append(pos)
                 pos = None
+
+            # ── Trailing SL ───────────────────────────────────────────────
+            if trail_trigger_pct > 0:
+                if pos.side == "long":
+                    if pos.best_price is None or hi > pos.best_price:
+                        pos.best_price = hi
+                    if pos.best_price >= pos.entry_price * (1 + trail_trigger_pct):
+                        new_sl = pos.best_price * (1 - trail_dist_pct)
+                        if new_sl > pos.sl_price:
+                            pos.sl_price = new_sl
+                else:
+                    if pos.best_price is None or lo < pos.best_price:
+                        pos.best_price = lo
+                    if pos.best_price <= pos.entry_price * (1 - trail_trigger_pct):
+                        new_sl = pos.best_price * (1 + trail_dist_pct)
+                        if new_sl < pos.sl_price:
+                            pos.sl_price = new_sl
 
             bars_in = i - pos.entry_bar
             if pos.side == "long":

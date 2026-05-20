@@ -2,7 +2,8 @@ services:
   aibot:
     build: .
     env_file: .env
+    command: python macd_bt.py
     volumes:
-      - ./data:/app/data       # кэш свечей сохраняется между перезапусками
+      - ./data:/app/data
       - ./logs:/app/logs
     restart: "no"

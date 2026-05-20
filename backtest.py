@@ -7,13 +7,12 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    ATR_PERIOD, ATR_SL_MULT, ATR_TRAIL_MULT,
-    BARS_PER_YEAR, BREAKOUT_BARS, CAPITAL, COMMISSION,
-    EMA_TREND, EMA_TREND_SLOPE,
-    LEVERAGE, MAX_HOLD_BARS, MIN_HOLD_BARS, POSITION_PCT,
-    RSI_LONG_MAX, RSI_LONG_MIN, RSI_PERIOD,
-    RSI_SHORT_MAX, RSI_SHORT_MIN,
-    SLIPPAGE, VOL_MULT, VOL_PERIOD,
+    ATR_PERIOD, BARS_PER_YEAR, BB_PERIOD, BB_STD,
+    CAPITAL, COMMISSION,
+    EMA_1H, EMA_1H_SLOPE, EMA_MACRO,
+    LEVERAGE, MAX_HOLD_BARS, POSITION_PCT,
+    RSI_HIGH, RSI_LOW, RSI_PERIOD,
+    SL_PCT, SLIPPAGE, TP_PCT, TREND_EXIT_BARS,
 )
 
 
@@ -21,38 +20,29 @@ from config import (
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    c, h, l, v = df["close"], df["high"], df["low"], df["volume"]
+    c = df["close"]
+    h = df["high"]
+    l = df["low"]
 
-    # ATR
     tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
     df["atr"] = tr.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean()
 
-    # Макро-тренд
-    df["ema_trend"] = c.ewm(span=EMA_TREND, adjust=False).mean()
-
-    # RSI
     delta = c.diff()
     gain  = delta.clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
     loss  = (-delta).clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
     df["rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
 
-    # Объём MA
-    df["vol_ma"] = v.rolling(VOL_PERIOD).mean()
+    df["ema1h"] = c.ewm(span=EMA_1H, adjust=False).mean()
 
-    # Уровни консолидации (предыдущие N баров, без текущего)
-    df["break_high"] = h.rolling(BREAKOUT_BARS).max().shift(1)
-    df["break_low"]  = l.rolling(BREAKOUT_BARS).min().shift(1)
+    df["bb_mid"]   = c.rolling(BB_PERIOD).mean()
+    bb_std         = c.rolling(BB_PERIOD).std()
+    df["bb_upper"] = df["bb_mid"] + BB_STD * bb_std
+    df["bb_lower"] = df["bb_mid"] - BB_STD * bb_std
 
-    # Сырой флаг пробоя
-    bo_up_raw = (c > df["break_high"]).astype(int)
-    bo_dn_raw = (c < df["break_low"]).astype(int)
+    # Макро-фильтр режима: EMA480 = 5 дней (отсекает сделки против рынка)
+    df["ema_macro"] = c.ewm(span=EMA_MACRO, adjust=False).mean()
 
-    # Свежий пробой = пробой сейчас + не было пробоев в предыдущих BREAKOUT_BARS барах
-    # (cooldown: после пробоя следующий сигнал возможен не раньше чем через N баров)
-    df["bo_up"]   = (bo_up_raw == 1) & (bo_up_raw.rolling(BREAKOUT_BARS).max().shift(1) == 0)
-    df["bo_down"] = (bo_dn_raw == 1) & (bo_dn_raw.rolling(BREAKOUT_BARS).max().shift(1) == 0)
-
-    return df.dropna(subset=["atr", "ema_trend", "rsi", "vol_ma", "break_high", "break_low"])
+    return df.dropna(subset=["atr", "rsi", "ema1h", "bb_mid", "bb_upper", "bb_lower"])
 
 
 # ── Trade ────────────────────────────────────────────────────────────────────
@@ -63,6 +53,7 @@ class Trade:
     entry_bar:   int
     entry_price: float
     sl_price:    float
+    tp_price:    float
     exit_bar:    Optional[int]   = None
     exit_price:  Optional[float] = None
     exit_reason: Optional[str]   = None
@@ -92,20 +83,22 @@ class Trade:
 
 # ── Engine ───────────────────────────────────────────────────────────────────
 
-def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
-    opens      = df["open"].values
-    highs      = df["high"].values
-    lows       = df["low"].values
-    closes     = df["close"].values
-    atr        = df["atr"].values
-    ema_trend  = df["ema_trend"].values
-    rsi        = df["rsi"].values
-    volume     = df["volume"].values
-    vol_ma     = df["vol_ma"].values
-    break_high = df["break_high"].values
-    break_low  = df["break_low"].values
-    bo_up_arr  = df["bo_up"].values
-    bo_dn_arr  = df["bo_down"].values
+def run_backtest(
+    df: pd.DataFrame,
+    rsi_low:  float = RSI_LOW,
+    rsi_high: float = RSI_HIGH,
+    sl_pct:   float = SL_PCT,
+    tp_pct:   float = TP_PCT,
+) -> tuple[list[Trade], np.ndarray]:
+    opens     = df["open"].values
+    highs     = df["high"].values
+    lows      = df["low"].values
+    closes    = df["close"].values
+    rsi       = df["rsi"].values
+    ema1h     = df["ema1h"].values
+    ema_macro = df["ema_macro"].values
+    bb_upper  = df["bb_upper"].values
+    bb_lower  = df["bb_lower"].values
 
     n         = len(df)
     equity    = np.full(n, np.nan)
@@ -114,13 +107,9 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
 
     trades: list[Trade]         = []
     pos:    Optional[Trade]     = None
-    pending_side:  Optional[str] = None
-    pending_bo_sl: float         = np.nan   # структурный SL от пробойного уровня
+    pending_side: Optional[str] = None
 
-    trail_sl:   float = np.nan
-    peak_price: float = np.nan
-
-    start = EMA_TREND + BREAKOUT_BARS * 2 + 2
+    start = EMA_1H_SLOPE + 2
 
     for i in range(start, n):
 
@@ -128,99 +117,65 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
         if pending_side and pos is None:
             entry = opens[i]
             side  = pending_side
-
-            # Структурный SL: граница консолидации перед пробоем
-            # Ограничен ATR_SL_MULT × ATR чтобы не брать слишком широкий диапазон
             if side == "long":
-                sl_structural = pending_bo_sl                  # break_low = дно диапазона
-                sl_atr        = entry - ATR_SL_MULT * atr[i-1]
-                sl = max(sl_structural, sl_atr)                # тighter из двух
+                sl = entry * (1 - sl_pct)
+                tp = entry * (1 + tp_pct)
             else:
-                sl_structural = pending_bo_sl                  # break_high = потолок диапазона
-                sl_atr        = entry + ATR_SL_MULT * atr[i-1]
-                sl = min(sl_structural, sl_atr)
-
-            sl_dist = abs(entry - sl)
-
-            # Отклоняем если SL слишком мал (комиссии съедят всё)
-            if sl_dist / entry < (COMMISSION + SLIPPAGE) * 3:
-                pending_side  = None
-                pending_bo_sl = np.nan
-            else:
-                pos        = Trade(side=side, entry_bar=i, entry_price=entry, sl_price=sl)
-                trail_sl   = sl
-                peak_price = entry
-                pending_side  = None
-                pending_bo_sl = np.nan
+                sl = entry * (1 + sl_pct)
+                tp = entry * (1 - tp_pct)
+            pos = Trade(side=side, entry_bar=i,
+                        entry_price=entry, sl_price=sl, tp_price=tp)
+            pending_side = None
 
         # ── Position management ──────────────────────────────────────────
         if pos is not None:
-            hi, lo, cl  = highs[i], lows[i], closes[i]
-            sl_dist_orig = abs(pos.entry_price - pos.sl_price)
-            bars_in      = i - pos.entry_bar
+            hi, lo, cl = highs[i], lows[i], closes[i]
 
             def _close(price: float, reason: str) -> None:
-                nonlocal capital, pos, trail_sl, peak_price
+                nonlocal capital, pos
                 pos.exit_bar    = i
                 pos.exit_price  = price
                 pos.exit_reason = reason
-                capital    = capital * (1 + POSITION_PCT * pos.pnl_pct)
+                capital = capital * (1 + POSITION_PCT * pos.pnl_pct)
                 trades.append(pos)
-                pos        = None
-                trail_sl   = np.nan
-                peak_price = np.nan
+                pos = None
 
+            bars_in = i - pos.entry_bar
             if pos.side == "long":
-                peak_price = max(peak_price, hi)
-                # Безубыток при 1R
-                if peak_price >= pos.entry_price + sl_dist_orig:
-                    trail_sl = max(trail_sl, pos.entry_price)
-                # Trailing: стоп подтягивается за пиком
-                trail_sl = max(trail_sl, peak_price - ATR_TRAIL_MULT * atr[i])
-
-                if   opens[i] <= trail_sl:                                            _close(opens[i], "sl_gap")
-                elif lo <= trail_sl:                                                  _close(trail_sl, "sl")
-                elif bars_in >= MAX_HOLD_BARS:                                        _close(cl,       "timeout")
-                elif (bars_in >= MIN_HOLD_BARS
-                      and closes[i] < ema_trend[i]
-                      and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE]):             _close(cl,       "trend_exit")
-
-            else:  # short
-                peak_price = min(peak_price, lo)
-                if peak_price <= pos.entry_price - sl_dist_orig:
-                    trail_sl = min(trail_sl, pos.entry_price)
-                trail_sl = min(trail_sl, peak_price + ATR_TRAIL_MULT * atr[i])
-
-                if   opens[i] >= trail_sl:                                            _close(opens[i], "sl_gap")
-                elif hi >= trail_sl:                                                  _close(trail_sl, "sl")
-                elif bars_in >= MAX_HOLD_BARS:                                        _close(cl,       "timeout")
-                elif (bars_in >= MIN_HOLD_BARS
-                      and closes[i] > ema_trend[i]
-                      and ema_trend[i] > ema_trend[i - EMA_TREND_SLOPE]):             _close(cl,       "trend_exit")
+                if   opens[i] <= pos.sl_price:                                              _close(opens[i],     "sl_gap")
+                elif lo       <= pos.sl_price:                                              _close(pos.sl_price, "sl")
+                elif hi       >= pos.tp_price:                                              _close(pos.tp_price, "tp")
+                elif bars_in  >= TREND_EXIT_BARS and ema1h[i] < ema1h[i - EMA_1H_SLOPE]:   _close(cl,           "trend_exit")
+                elif bars_in  >= MAX_HOLD_BARS:                                             _close(cl,           "timeout")
+            else:
+                if   opens[i] >= pos.sl_price:                                              _close(opens[i],     "sl_gap")
+                elif hi       >= pos.sl_price:                                              _close(pos.sl_price, "sl")
+                elif lo       <= pos.tp_price:                                              _close(pos.tp_price, "tp")
+                elif bars_in  >= TREND_EXIT_BARS and ema1h[i] > ema1h[i - EMA_1H_SLOPE]:   _close(cl,           "trend_exit")
+                elif bars_in  >= MAX_HOLD_BARS:                                             _close(cl,           "timeout")
 
         equity[i] = capital
 
-        # ── Signal: свежий пробой после консолидации ──────────────────────
+        # ── Signal: RSI extremum + BB touch + EMA trend ───────────────────
         if pos is None and pending_side is None:
-            vol_ok     = volume[i] > vol_ma[i] * VOL_MULT
-            trend_up   = (closes[i] > ema_trend[i]
-                          and ema_trend[i] > ema_trend[i - EMA_TREND_SLOPE])
-            trend_down = (closes[i] < ema_trend[i]
-                          and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE])
+            trend_up   = ema1h[i] > ema1h[i - EMA_1H_SLOPE]
+            trend_down = ema1h[i] < ema1h[i - EMA_1H_SLOPE]
 
-            if (bo_up_arr[i]
-                    and RSI_LONG_MIN  < rsi[i] < RSI_LONG_MAX
-                    and vol_ok
-                    and trend_up):
-                pending_side  = "long"
-                pending_bo_sl = break_low[i]   # дно консолидации = структурный SL
+            # Макро-фильтр: торгуем только в согласии с 5-дневным трендом
+            bull_regime = closes[i] > ema_macro[i]
+            bear_regime = closes[i] < ema_macro[i]
 
-            elif (bo_dn_arr[i]
-                    and RSI_SHORT_MIN < rsi[i] < RSI_SHORT_MAX
-                    and vol_ok
-                    and trend_down):
-                pending_side  = "short"
-                pending_bo_sl = break_high[i]  # потолок консолидации = структурный SL
+            if (rsi[i] < rsi_low
+                    and closes[i] <= bb_lower[i] * 1.005
+                    and trend_up
+                    and bull_regime):
+                pending_side = "long"
+
+            elif (rsi[i] > rsi_high
+                    and closes[i] >= bb_upper[i] * 0.995
+                    and trend_down
+                    and bear_regime):
+                pending_side = "short"
 
     if pos is not None:
         pos.exit_bar    = n - 1
@@ -284,14 +239,15 @@ def calc_stats(trades: list[Trade], equity: np.ndarray) -> dict:
     }
 
 
-def print_report(stats: dict) -> None:
+def print_report(stats: dict, label: str = "") -> None:
     if not stats:
         print("Нет сделок — условия не выполнились за период.")
         return
 
     sep = "─" * 44
+    title = f"15m  |  RSI MeanRev{' ' + label if label else ''}"
     print(f"\n{sep}")
-    print(f"  БЭКТЕСТ ETH/USDT:USDT  5m  |  Breakout")
+    print(f"  БЭКТЕСТ ETH/USDT:USDT  {title}")
     print(sep)
     print(f"  Сделок всего     : {stats['n_trades']}  "
           f"(L:{stats['n_long']} / S:{stats['n_short']})")
@@ -305,7 +261,7 @@ def print_report(stats: dict) -> None:
     print(f"  Ср. победа       : {stats['avg_win_pct']:+.2f}%")
     print(f"  Ср. потеря       : {stats['avg_loss_pct']:+.2f}%")
     print(f"  Ср. держание     : {stats['avg_hold_bars']:.0f} баров  "
-          f"({stats['avg_hold_bars'] * 5 / 60:.1f} ч)")
+          f"({stats['avg_hold_bars'] * 15 / 60:.1f} ч)")
     print(sep)
     print("  Причины выходов:")
     for reason, cnt in sorted(stats["exit_reasons"].items(), key=lambda x: -x[1]):

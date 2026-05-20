@@ -1,38 +1,33 @@
 SYMBOL    = "ETH/USDT:USDT"
-TIMEFRAME = "5m"
+TIMEFRAME = "15m"
 CAPITAL   = 300.0
-DAYS_BACK = 1095
+DAYS_BACK = 1460   # 4 года → больше сделок
 
-COMMISSION = 0.0002   # maker OKX (0.02%)
+COMMISSION = 0.0002
 SLIPPAGE   = 0.0002
 
-# ── Стратегия: N-Bar Breakout + ATR Trailing Stop ──────────────────────────
-# Сигнал: цена закрывается выше/ниже максимума/минимума последних N баров
-# с подтверждением объёма и направления EMA50
-# SL: 1.5× ATR от цены входа; TP: динамический trailing
+# ── Стратегия: RSI Mean Reversion (15m) ───────────────────────────────────
+# RSI экстремум + BB touch + EMA тренд
+# Лучший ранее найденный результат: RSI 28/72, PF 1.34 (27 сделок / 3 года)
 
-BREAKOUT_BARS = 20     # ширина окна пробоя (20 × 5m = 100 мин)
+EMA_1H       = 48    # 48 × 15m = 12 часов
+EMA_1H_SLOPE = 12    # наклон за 3 часа
+EMA_MACRO    = 480   # 480 × 15m = 120 часов = 5 дней (режим рынка)
 
-EMA_TREND       = 50   # макро-тренд (50 × 5m = 4ч10м)
-EMA_TREND_SLOPE = 12   # наклон EMA50 за 12 баров (1 час)
+BB_PERIOD = 20
+BB_STD    = 2.0
 
-ATR_PERIOD     = 14
-ATR_SL_MULT    = 1.5   # SL = 1.5× ATR от входа
-ATR_TRAIL_MULT = 1.5   # trailing SL = пик − 1.5× ATR
+RSI_PERIOD = 14
+RSI_LOW    = 28
+RSI_HIGH   = 72
 
-VOL_PERIOD = 20
-VOL_MULT   = 1.5       # объём > 1.5× средний (реальный импульс)
+SL_PCT = 0.020   # 2.0%
+TP_PCT = 0.035   # 3.5%
 
-RSI_PERIOD    = 14
-RSI_LONG_MIN  = 50     # тренд вверх (не перепродан)
-RSI_LONG_MAX  = 75     # не перекуплен
-RSI_SHORT_MIN = 25
-RSI_SHORT_MAX = 50
+TREND_EXIT_BARS = 15
+MAX_HOLD_BARS   = 32
+POSITION_PCT    = 0.95
+LEVERAGE        = 2
 
-MIN_HOLD_BARS = 6      # минимум 30 мин до signal_exit
-MAX_HOLD_BARS = 48     # максимум 4 часа
-
-LEVERAGE     = 2
-POSITION_PCT = 0.95
-
-BARS_PER_YEAR = 365 * 24 * 12  # 5m баров в году
+ATR_PERIOD    = 14
+BARS_PER_YEAR = 365 * 24 * 4   # 15m баров в году

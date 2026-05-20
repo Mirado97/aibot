@@ -27,8 +27,7 @@ if not os.path.exists(_plotly_dst):
 def static_files(filename):
     return send_from_directory(_static, filename)
 
-SYMBOLS = ["ETH/USDT:USDT", "SOL/USDT:USDT", "BTC/USDT:USDT",
-           "DOGE/USDT:USDT", "XRP/USDT:USDT"]
+SYMBOLS = ["ETH/USDT:USDT"]
 
 
 def build_html(symbol, sl_pct, tp_pct, days_view):

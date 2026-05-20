@@ -2,13 +2,18 @@
 import warnings, time, json
 warnings.filterwarnings("ignore")
 
-from flask import Flask, request, Response
+from flask import Flask, request, Response, send_from_directory
 import pandas as pd
+import os
 
 from data import load_ohlcv
 import macd_bt as mb
 
 app = Flask(__name__)
+
+@app.route("/static/<path:f>")
+def static_files(f):
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), f)
 
 SYMBOL    = "ETH/USDT:USDT"
 SL_PCT    = 0.010
@@ -115,7 +120,7 @@ def build_page() -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AIBot Dashboard</title>
-<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/static/lw-charts.js"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0e1117;color:#e0e0e0;font-family:sans-serif;font-size:13px}}

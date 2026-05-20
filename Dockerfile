@@ -7,8 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Папка для кэша данных
-RUN mkdir -p data
+RUN mkdir -p data static && \
+    python -c "import urllib.request; urllib.request.urlretrieve('https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js', 'static/lw-charts.js')"
 
-ENV SCRIPT=run.py
-CMD ["sh", "-c", "python $SCRIPT"]
+CMD ["python", "app.py"]

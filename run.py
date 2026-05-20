@@ -32,7 +32,7 @@ def main() -> None:
 def _plot(df, trades, equity) -> None:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True,
                                     gridspec_kw={"height_ratios": [3, 1]})
-    fig.suptitle("ETH/USDT 5m  |  Hybrid Regime Strategy", fontsize=13)
+    fig.suptitle("ETH/USDT 5m  |  EMA Momentum + ATR Trailing", fontsize=13)
 
     idx = np.arange(len(df))
 

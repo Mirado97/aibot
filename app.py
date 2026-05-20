@@ -1,17 +1,31 @@
 """Flask dashboard — MACD backtest viewer."""
-import warnings
+import warnings, shutil, os
 warnings.filterwarnings("ignore")
 
-from flask import Flask, request, Response
+from flask import Flask, request, Response, send_from_directory
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
 import pandas as pd
+import plotly
 
 from data import load_ohlcv
 import macd_bt as mb
 
 app = Flask(__name__)
+
+# Копируем plotly.min.js из пакета в static/ при старте
+_static = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(_static, exist_ok=True)
+_plotly_src = os.path.join(os.path.dirname(plotly.__file__), "package_data", "plotly.min.js")
+_plotly_dst = os.path.join(_static, "plotly.min.js")
+if not os.path.exists(_plotly_dst):
+    shutil.copy(_plotly_src, _plotly_dst)
+
+
+@app.route("/static/<path:filename>")
+def static_files(filename):
+    return send_from_directory(_static, filename)
 
 SYMBOLS = ["ETH/USDT:USDT", "SOL/USDT:USDT", "BTC/USDT:USDT",
            "DOGE/USDT:USDT", "XRP/USDT:USDT"]
@@ -114,7 +128,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
         fig.update_xaxes(gridcolor="#1f2937", zeroline=False, row=i, col=1)
         fig.update_yaxes(gridcolor="#1f2937", zeroline=False, row=i, col=1)
 
-    chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=True)
+    chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
 
     s = stats or {}
     pf_color = "color:#4CAF50" if s.get("profit_factor", 0) >= 1 else "color:#ef5350"
@@ -160,6 +174,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AIBot Dashboard</title>
+<script src="/static/plotly.min.js"></script>
 <style>
   body{{margin:0;background:#0e1117;color:#e0e0e0;font-family:sans-serif;font-size:13px}}
   h1{{margin:12px 16px 4px;font-size:18px;color:#00bcd4}}

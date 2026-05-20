@@ -8,8 +8,8 @@ import pandas as pd
 
 from config import (
     ATR_PERIOD, ATR_SL_MULT, ATR_TRAIL_MULT,
-    BARS_PER_YEAR, CAPITAL, COMMISSION,
-    EMA_FAST, EMA_SLOW, EMA_TREND,
+    BARS_PER_YEAR, BREAKOUT_BARS, CAPITAL, COMMISSION,
+    EMA_TREND, EMA_TREND_SLOPE,
     LEVERAGE, MAX_HOLD_BARS, MIN_HOLD_BARS, POSITION_PCT,
     RSI_LONG_MAX, RSI_LONG_MIN, RSI_PERIOD,
     RSI_SHORT_MAX, RSI_SHORT_MIN,
@@ -23,21 +23,27 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     c, h, l, v = df["close"], df["high"], df["low"], df["volume"]
 
+    # ATR
     tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
     df["atr"] = tr.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean()
 
-    df["ema_fast"]  = c.ewm(span=EMA_FAST,  adjust=False).mean()
-    df["ema_slow"]  = c.ewm(span=EMA_SLOW,  adjust=False).mean()
+    # Макро-тренд
     df["ema_trend"] = c.ewm(span=EMA_TREND, adjust=False).mean()
 
+    # RSI
     delta = c.diff()
     gain  = delta.clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
     loss  = (-delta).clip(lower=0).ewm(alpha=1 / RSI_PERIOD, adjust=False).mean()
     df["rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
 
+    # Объём MA
     df["vol_ma"] = v.rolling(VOL_PERIOD).mean()
 
-    return df.dropna(subset=["atr", "ema_fast", "ema_slow", "ema_trend", "rsi", "vol_ma"])
+    # Пробойные уровни: максимум/минимум предыдущих N баров (shift(1) = без текущего)
+    df["break_high"] = h.rolling(BREAKOUT_BARS).max().shift(1)
+    df["break_low"]  = l.rolling(BREAKOUT_BARS).min().shift(1)
+
+    return df.dropna(subset=["atr", "ema_trend", "rsi", "vol_ma", "break_high", "break_low"])
 
 
 # ── Trade ────────────────────────────────────────────────────────────────────
@@ -47,7 +53,7 @@ class Trade:
     side:        str
     entry_bar:   int
     entry_price: float
-    sl_price:    float            # начальный SL (для статистики)
+    sl_price:    float
     exit_bar:    Optional[int]   = None
     exit_price:  Optional[float] = None
     exit_reason: Optional[str]   = None
@@ -78,17 +84,17 @@ class Trade:
 # ── Engine ───────────────────────────────────────────────────────────────────
 
 def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
-    opens     = df["open"].values
-    highs     = df["high"].values
-    lows      = df["low"].values
-    closes    = df["close"].values
-    atr       = df["atr"].values
-    ema_fast  = df["ema_fast"].values
-    ema_slow  = df["ema_slow"].values
-    ema_trend = df["ema_trend"].values
-    rsi       = df["rsi"].values
-    volume    = df["volume"].values
-    vol_ma    = df["vol_ma"].values
+    opens       = df["open"].values
+    highs       = df["high"].values
+    lows        = df["low"].values
+    closes      = df["close"].values
+    atr         = df["atr"].values
+    ema_trend   = df["ema_trend"].values
+    rsi         = df["rsi"].values
+    volume      = df["volume"].values
+    vol_ma      = df["vol_ma"].values
+    break_high  = df["break_high"].values
+    break_low   = df["break_low"].values
 
     n         = len(df)
     equity    = np.full(n, np.nan)
@@ -99,10 +105,10 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
     pos:    Optional[Trade]     = None
     pending_side: Optional[str] = None
 
-    trail_sl:   float = np.nan   # текущий trailing stop (двигается только в сторону прибыли)
-    peak_price: float = np.nan   # лучшая достигнутая цена с момента входа
+    trail_sl:   float = np.nan
+    peak_price: float = np.nan
 
-    start = EMA_TREND + 2
+    start = EMA_TREND + BREAKOUT_BARS + 2
 
     for i in range(start, n):
 
@@ -112,7 +118,7 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
             side    = pending_side
             sl_dist = ATR_SL_MULT * atr[i - 1]
 
-            # Отклоняем сделку если SL слишком мал для покрытия комиссий (×3 запас)
+            # Отклоняем если SL слишком мал для покрытия комиссий
             if sl_dist / entry < (COMMISSION + SLIPPAGE) * 3:
                 pending_side = None
             else:
@@ -140,18 +146,20 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
                 peak_price = np.nan
 
             if pos.side == "long":
-                # Обновить пик и подтянуть стоп
                 peak_price = max(peak_price, hi)
-                # Безубыток при достижении 1R
+                # Безубыток при 1R
                 if peak_price >= pos.entry_price + sl_dist_orig:
                     trail_sl = max(trail_sl, pos.entry_price)
-                # Trailing: SL тянется за пиком с отступом ATR_TRAIL_MULT × ATR
+                # Trailing: тянем за пиком
                 trail_sl = max(trail_sl, peak_price - ATR_TRAIL_MULT * atr[i])
 
-                if   opens[i] <= trail_sl:                                            _close(opens[i], "sl_gap")
-                elif lo <= trail_sl:                                                  _close(trail_sl, "sl")
-                elif bars_in >= MAX_HOLD_BARS:                                        _close(cl,       "timeout")
-                elif bars_in >= MIN_HOLD_BARS and ema_fast[i] < ema_slow[i]:         _close(cl,       "signal_exit")
+                if   opens[i] <= trail_sl:                                    _close(opens[i], "sl_gap")
+                elif lo <= trail_sl:                                          _close(trail_sl, "sl")
+                elif bars_in >= MAX_HOLD_BARS:                                _close(cl,       "timeout")
+                # Выход при развороте тренда (после минимального удержания)
+                elif (bars_in >= MIN_HOLD_BARS
+                        and closes[i] < ema_trend[i]
+                        and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE]):  _close(cl,       "trend_exit")
 
             else:  # short
                 peak_price = min(peak_price, lo)
@@ -159,29 +167,31 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], np.ndarray]:
                     trail_sl = min(trail_sl, pos.entry_price)
                 trail_sl = min(trail_sl, peak_price + ATR_TRAIL_MULT * atr[i])
 
-                if   opens[i] >= trail_sl:                                            _close(opens[i], "sl_gap")
-                elif hi >= trail_sl:                                                  _close(trail_sl, "sl")
-                elif bars_in >= MAX_HOLD_BARS:                                        _close(cl,       "timeout")
-                elif bars_in >= MIN_HOLD_BARS and ema_fast[i] > ema_slow[i]:         _close(cl,       "signal_exit")
+                if   opens[i] >= trail_sl:                                    _close(opens[i], "sl_gap")
+                elif hi >= trail_sl:                                          _close(trail_sl, "sl")
+                elif bars_in >= MAX_HOLD_BARS:                                _close(cl,       "timeout")
+                elif (bars_in >= MIN_HOLD_BARS
+                        and closes[i] > ema_trend[i]
+                        and ema_trend[i] > ema_trend[i - EMA_TREND_SLOPE]):  _close(cl,       "trend_exit")
 
         equity[i] = capital
 
-        # ── Signal: свежий крест EMA9/21 + RSI + объём + EMA50 тренд ─────
+        # ── Signal: свежий пробой N-bar high/low ─────────────────────────
         if pos is None and pending_side is None:
-            cross_up   = ema_fast[i] > ema_slow[i] and ema_fast[i-1] <= ema_slow[i-1]
-            cross_down = ema_fast[i] < ema_slow[i] and ema_fast[i-1] >= ema_slow[i-1]
             vol_ok     = volume[i] > vol_ma[i] * VOL_MULT
+            trend_up   = (closes[i] > ema_trend[i]
+                          and ema_trend[i] > ema_trend[i - EMA_TREND_SLOPE])
+            trend_down = (closes[i] < ema_trend[i]
+                          and ema_trend[i] < ema_trend[i - EMA_TREND_SLOPE])
 
-            if (cross_up
-                    and RSI_LONG_MIN  < rsi[i] < RSI_LONG_MAX
-                    and vol_ok
-                    and closes[i] > ema_trend[i]):
+            # Свежий пробой: текущий бар пробил, предыдущий — нет
+            bo_up   = closes[i] > break_high[i] and closes[i-1] <= break_high[i-1]
+            bo_down = closes[i] < break_low[i]  and closes[i-1] >= break_low[i-1]
+
+            if bo_up and RSI_LONG_MIN < rsi[i] < RSI_LONG_MAX and vol_ok and trend_up:
                 pending_side = "long"
 
-            elif (cross_down
-                    and RSI_SHORT_MIN < rsi[i] < RSI_SHORT_MAX
-                    and vol_ok
-                    and closes[i] < ema_trend[i]):
+            elif bo_down and RSI_SHORT_MIN < rsi[i] < RSI_SHORT_MAX and vol_ok and trend_down:
                 pending_side = "short"
 
     if pos is not None:
@@ -253,7 +263,7 @@ def print_report(stats: dict) -> None:
 
     sep = "─" * 44
     print(f"\n{sep}")
-    print(f"  БЭКТЕСТ ETH/USDT:USDT  5m  |  EMA Momentum")
+    print(f"  БЭКТЕСТ ETH/USDT:USDT  5m  |  Breakout")
     print(sep)
     print(f"  Сделок всего     : {stats['n_trades']}  "
           f"(L:{stats['n_long']} / S:{stats['n_short']})")

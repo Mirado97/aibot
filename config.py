@@ -6,29 +6,31 @@ DAYS_BACK = 1095
 COMMISSION = 0.0002   # maker OKX (0.02%)
 SLIPPAGE   = 0.0002
 
-# ── Стратегия: EMA Momentum + ATR Trailing Stop ────────────────────────────
-# Вход: свежий крест EMA9/21 + RSI зона + объём + макротренд EMA50
-# SL: фиксированный 1.5× ATR; TP: динамический trailing от пика
+# ── Стратегия: N-Bar Breakout + ATR Trailing Stop ──────────────────────────
+# Сигнал: цена закрывается выше/ниже максимума/минимума последних N баров
+# с подтверждением объёма и направления EMA50
+# SL: 1.5× ATR от цены входа; TP: динамический trailing
 
-EMA_FAST  = 9    # 45 мин
-EMA_SLOW  = 21   # 1 ч 45 мин
-EMA_TREND = 50   # 4 ч 10 мин (макро-фильтр)
+BREAKOUT_BARS = 20     # ширина окна пробоя (20 × 5m = 100 мин)
+
+EMA_TREND       = 50   # макро-тренд (50 × 5m = 4ч10м)
+EMA_TREND_SLOPE = 12   # наклон EMA50 за 12 баров (1 час)
 
 ATR_PERIOD     = 14
-ATR_SL_MULT    = 1.5   # SL = 1.5× ATR от цены входа
+ATR_SL_MULT    = 1.5   # SL = 1.5× ATR от входа
 ATR_TRAIL_MULT = 1.5   # trailing SL = пик − 1.5× ATR
 
 VOL_PERIOD = 20
-VOL_MULT   = 1.3       # объём > 1.3× средний (импульс, не дрейф)
+VOL_MULT   = 1.5       # объём > 1.5× средний (реальный импульс)
 
 RSI_PERIOD    = 14
-RSI_LONG_MIN  = 45     # нет перепроданности (мы входим в тренд)
-RSI_LONG_MAX  = 72
-RSI_SHORT_MIN = 28
-RSI_SHORT_MAX = 55
+RSI_LONG_MIN  = 50     # тренд вверх (не перепродан)
+RSI_LONG_MAX  = 75     # не перекуплен
+RSI_SHORT_MIN = 25
+RSI_SHORT_MAX = 50
 
-MIN_HOLD_BARS = 3      # минимум 15 мин до выхода по signal_exit
-MAX_HOLD_BARS = 48     # максимум 4 часа (48 × 5m)
+MIN_HOLD_BARS = 6      # минимум 30 мин до signal_exit
+MAX_HOLD_BARS = 48     # максимум 4 часа
 
 LEVERAGE     = 2
 POSITION_PCT = 0.95

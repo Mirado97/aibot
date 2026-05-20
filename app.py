@@ -23,10 +23,6 @@ _trades, _equity = mb.run_backtest(_df, sl_pct=SL_PCT, tp_pct=TP_PCT)
 _stats  = mb.calc_stats(_trades, _equity)
 print(f"Сделок: {_stats['n_trades']}", flush=True)
 
-# Читаем JS библиотеку
-_lw_js_path = os.path.join(os.path.dirname(__file__), "static", "lw-charts.js")
-with open(_lw_js_path, "r") as f:
-    _LW_JS = f.read().replace("</script>", "<\\/script>")
 
 
 def _make_page() -> str:
@@ -145,10 +141,10 @@ def _make_page() -> str:
         "<th>Вход $</th><th>Выход $</th><th>PnL %</th><th>Причина</th></tr>"
         + rows +
         "</table></div>"
-        "<script>" + _LW_JS + "</script>"
+        "<script src='/static/lw-charts.js'></script>"
         "<script>"
         "var D=document.getElementById('dbg');"
-        "D.innerText='LW: '+typeof LightweightCharts+' | candles: ' + " + str(len(candles)) + " + ' pts';"
+        "D.innerText='LW: '+typeof LightweightCharts;"
         "try{"
         "var OPT={"
         "layout:{background:{color:'#0e1117'},textColor:'#9ca3af'},"

@@ -10,4 +10,5 @@ COPY . .
 # Папка для кэша данных
 RUN mkdir -p data
 
-CMD ["python", "run.py"]
+ENV SCRIPT=run.py
+CMD ["sh", "-c", "python $SCRIPT"]

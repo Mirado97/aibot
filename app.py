@@ -26,7 +26,7 @@ print(f"Сделок: {_stats['n_trades']}", flush=True)
 # Читаем JS библиотеку
 _lw_js_path = os.path.join(os.path.dirname(__file__), "static", "lw-charts.js")
 with open(_lw_js_path, "r") as f:
-    _LW_JS = f.read()
+    _LW_JS = f.read().replace("</script>", "<\\/script>")
 
 
 def _make_page() -> str:
@@ -145,7 +145,7 @@ def _make_page() -> str:
         + rows +
         "</table></div>"
         "<script>" + _LW_JS + "</script>"
-        "<script>"
+        "<script>console.log('JS start',typeof LightweightCharts);"
         "const OPT={"
         "autoSize:true,"
         "layout:{background:{color:'#0e1117'},textColor:'#9ca3af'},"

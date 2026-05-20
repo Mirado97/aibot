@@ -2,20 +2,10 @@ services:
   aibot:
     build: .
     env_file: .env
-    command: streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
-    expose:
-      - "8501"
+    command: python app.py
+    ports:
+      - "8080:8080"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - aibot
     restart: unless-stopped

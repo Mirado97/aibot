@@ -2,8 +2,10 @@ services:
   aibot:
     build: .
     env_file: .env
-    command: python macd_bt.py
+    command: streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    ports:
+      - "8501:8501"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-    restart: "no"
+    restart: unless-stopped

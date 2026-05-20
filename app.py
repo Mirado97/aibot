@@ -12,9 +12,9 @@ app = Flask(__name__)
 SYMBOL        = "ETH/USDT:USDT"
 SL_PCT        = 0.010
 TP_PCT        = 0.020
-TRAIL_TRIGGER = 0.010
-TRAIL_DIST    = 0.010
-TRAIL_TP      = 0.050
+TRAIL_TRIGGER = 0.020
+TRAIL_DIST    = 0.020
+TRAIL_TP      = 0.100
 
 print("Загрузка данных…", flush=True)
 _df_raw = load_ohlcv(SYMBOL)

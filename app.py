@@ -154,7 +154,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
         for s in SYMBOLS
     )
 
-    return f"""<!DOCTYPE html>
+    page = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -195,7 +195,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
   <div class="metric"><div class="label">Sharpe</div><div class="value">{s.get('sharpe',0):.2f}</div></div>
   <div class="metric"><div class="label">SL / TP</div><div class="value">{sl_pct*100:.1f}% / {tp_pct*100:.1f}%</div></div>
 </div>
-<div class="section">{chart_html}</div>
+<div class="section">CHART_PLACEHOLDER</div>
 <div class="section">
   <h2 style="font-size:15px">Ордера ({len(trades)} всего)</h2>
   <table>
@@ -205,6 +205,7 @@ def build_html(symbol, sl_pct, tp_pct, days_view):
 </div>
 </body>
 </html>"""
+    return page.replace("CHART_PLACEHOLDER", chart_html)
 
 
 @app.route("/")
